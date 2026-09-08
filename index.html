@@ -11,27 +11,17 @@
   <aside class="sidebar" id="sidebar">
     <div class="brand"><div class="brand-mark">M</div><div><strong>MEDICAL VA</strong><span>AUTOMATION SYSTEM</span></div></div>
     <nav id="nav">
-      <button class="nav-item active" data-view="dashboard">▦ <span>Dashboard</span></button>
-      <button class="nav-item" data-view="patients">♙ <span>Patients</span></button>
-      <button class="nav-item" data-view="appointments">◷ <span>Appointments</span></button>
-      <button class="nav-item" data-view="followups">↻ <span>Follow-ups</span></button>
-      <button class="nav-item" data-view="tasks">✓ <span>Tasks</span></button>
-      <button class="nav-item" data-view="automations">⚡ <span>Automations</span></button>
-      <button class="nav-item" data-view="messages">✉ <span>Messages</span></button>
-      <button class="nav-item" data-view="billing">₱ <span>Billing</span></button>
-      <button class="nav-item" data-view="insurance">▤ <span>Insurance</span></button>
-      <button class="nav-item" data-view="documents">□ <span>Documents</span></button>
-      <button class="nav-item" data-view="reports">▥ <span>Reports</span></button>
-      <button class="nav-item" data-view="activity">◉ <span>Activity</span></button>
+      <button class="nav-item active" data-view="dashboard">▦ <span>Dashboard</span></button><button class="nav-item" data-view="patients">♙ <span>Patients</span></button><button class="nav-item" data-view="appointments">◷ <span>Appointments</span></button><button class="nav-item" data-view="followups">↻ <span>Follow-ups</span></button><button class="nav-item" data-view="tasks">✓ <span>Tasks</span></button><button class="nav-item" data-view="automations">⚡ <span>Automations</span></button><button class="nav-item" data-view="messages">✉ <span>Messages</span></button><button class="nav-item" data-view="billing">₱ <span>Billing</span></button><button class="nav-item" data-view="insurance">▤ <span>Insurance</span></button><button class="nav-item" data-view="documents">□ <span>Documents</span></button><button class="nav-item" data-view="reports">▥ <span>Reports</span></button><button class="nav-item" data-view="activity">◉ <span>Activity</span></button>
     </nav>
-    <div class="sidebar-bottom"><div class="demo-note"><span class="dot"></span><div><b>Demo environment</b><small>Fictional patient data</small></div></div><button id="resetDemo" class="reset">↺ Reset demo data</button></div>
+    <div class="sidebar-bottom"><div class="demo-note"><span class="dot"></span><div><b>Workspace ready</b><small>Add your own records</small></div></div><button id="resetDemo" class="reset">↺ Clear workspace</button></div>
   </aside>
   <main class="main">
-    <header class="topbar"><button id="menu" class="icon-btn mobile-only">☰</button><div class="crumb"><span id="pageKicker">Workspace</span><b id="pageTitle">Dashboard</b></div><div class="top-actions"><label class="search">⌕<input id="globalSearch" placeholder="Search patients, tasks, files..."></label><button class="icon-btn" id="notificationBtn">♢<i id="notificationDot"></i></button><div class="user"><div class="avatar">JN</div><div><b>VA Admin</b><small>Owner / Super Admin</small></div></div></div></header>
+    <header class="topbar"><button id="menu" class="icon-btn mobile-only">☰</button><div class="crumb"><span id="pageKicker">Workspace</span><b id="pageTitle">Dashboard</b></div><div class="top-actions"><label class="search">⌕<input id="globalSearch" placeholder="Search patients, tasks, files..."></label><button class="icon-btn" id="notificationBtn">♢<i id="notificationDot"></i></button><div class="user"><div class="avatar">VA</div><div><b>Administrator</b><small>Owner / Super Admin</small></div></div></div></header>
     <section id="content" class="content"></section>
   </main>
 </div>
 <div id="modalRoot"></div><div id="toast" class="toast"></div>
+<script>localStorage.removeItem('mva-demo-v1');</script>
 <script src="app.js"></script>
 </body>
 </html>
