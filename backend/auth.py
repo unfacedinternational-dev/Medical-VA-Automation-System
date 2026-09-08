@@ -13,8 +13,8 @@ USERS = {
     "employer": {"display_name": "Employer", "role": "employer", "password_hash_env": "EMPLOYER_PASSWORD_HASH"},
 }
 
-# Temporary simple login fallback for the current private demo/workspace.
-# Both accounts can use 2026 without requiring local password-hash generation.
+# Current private workspace login. Both accounts use the same temporary password.
+# The configured bcrypt hashes remain supported as an additional login method.
 DEFAULT_LOGIN_PASSWORD = "2026"
 
 def _secret():
@@ -34,15 +34,17 @@ def hash_password(password: str) -> str:
 def verify_user(username: str, password: str) -> bool:
     if username not in USERS:
         return False
-    # Keep Vercel hashes working when configured, while allowing the current
-    # simple 2026 login so VA Joy and Employer can enter without setup commands.
+    # 2026 works for both VA Joy and Employer, without requiring local
+    # password-hash generation or any password changes in Vercel.
+    if password == DEFAULT_LOGIN_PASSWORD:
+        return True
     stored = _password_hash(username)
-    if stored:
-        try:
-            return bool(pwd_context.verify(password, stored))
-        except Exception:
-            return password == DEFAULT_LOGIN_PASSWORD
-    return password == DEFAULT_LOGIN_PASSWORD
+    if not stored:
+        return False
+    try:
+        return bool(pwd_context.verify(password, stored))
+    except Exception:
+        return False
 
 def create_access_token(subject: str, minutes: int = 480) -> str:
     expire = datetime.now(timezone.utc) + timedelta(minutes=minutes)
