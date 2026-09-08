@@ -3,8 +3,8 @@ from pathlib import Path
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
-# Vercel's deployed filesystem is read-only except for /tmp.
-# Keep SQLite configurable so production can later use a persistent database.
+# Production uses Supabase PostgreSQL through MEDICAL_VA_DATABASE_URL.
+# Local development keeps SQLite as the fallback.
 if os.environ.get("VERCEL"):
     default_db_path = Path("/tmp") / "medical_va.db"
 else:
@@ -12,7 +12,12 @@ else:
 
 DATABASE_URL = os.environ.get("MEDICAL_VA_DATABASE_URL") or f"sqlite:///{default_db_path}"
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
-engine = create_engine(DATABASE_URL, connect_args=connect_args, pool_pre_ping=True)
+engine = create_engine(
+    DATABASE_URL,
+    connect_args=connect_args,
+    pool_pre_ping=True,
+    pool_recycle=300,
+)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 class Base(DeclarativeBase):
