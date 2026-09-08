@@ -12,7 +12,7 @@ function showLanding(){
       <div class="auth-badge">PERSONALIZED WORKSPACE</div>
       <h1>Welcome to the<br><strong>Medical VA Automation System</strong></h1>
       <p class="auth-lead">A practical workflow system designed to organize medical virtual assistant operations, reduce repetitive administrative work, and keep important tasks moving from appointment to completion.</p>
-      <div class="auth-personal"><span>PERSONALIZED FOR</span><strong>VA Joy N.</strong><p>This workspace is tailored for Joy's medical VA workflow and designed to help the VA and employer work from one organized operational system.</p></div>
+      <div class="auth-personal"><span>PERSONALIZED FOR</span><strong>VA Joy N.</strong><p>This workspace is tailored for Joy's medical VA workflow and designed to help her and her employer work with one organized operational system.</p></div>
       <div class="auth-actions"><button class="auth-primary" id="howItWorks">How this system works <span>→</span></button></div>
       <div class="auth-access">
         <div class="access-card"><div class="access-icon">VA</div><div><h2>Are you VA Joy?</h2><p>Use the authorized VA account to access the workspace.</p></div><button class="auth-secondary" id="joyLogin">Enter as VA Joy</button></div>
