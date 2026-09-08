@@ -25,7 +25,7 @@
   document.head.appendChild(style);
 
   const noteTypes={joy:{label:'My Notes',from:'VA Joy',className:'note-row-joy'},employer:{label:'Employer Notes',from:'Employer',className:'note-row-employer'},shared:{label:'Shared Notes',from:'Both',className:'note-row-shared'}};
-  function ensureNotes(){if(!Array.isArray(db.notes))db.notes=[];save()}
+  function ensureNotes(){if(!Array.isArray(db.notes)){db.notes=[];save()}}
   function noteTypeBadge(type){const n=noteTypes[type]||noteTypes.shared;return `<span class="note-chip ${n.className}">${esc(n.label)}</span>`}
   function notes(){ensureNotes();return head('NOTES','Notes between VA Joy and the employer — personal or shared workspace notes.','＋ Add Note','add-note')+`<div class="notes-toolbar"><div class="notes-legend"><span class="note-chip note-row-joy">My Notes</span><span class="note-chip note-row-employer">Employer Notes</span><span class="note-chip note-row-shared">Shared Notes</span></div><select class="filter" id="noteFilter"><option value="all">All notes</option><option value="joy">My Notes</option><option value="employer">Employer Notes</option><option value="shared">Shared Notes</option></select></div><div class="card notes-card"><div class="table-scroll">${table(['Date','From','Note','Patient / Record','Type','Action'],db.notes.map(n=>{const t=noteTypes[n.type]||noteTypes.shared;return `<tr class="${t.className}" data-note-row="${esc(n.id)}"><td>${esc(n.date||'')}</td><td><b>${esc(t.from)}</b></td><td class="note-text">${esc(n.text)}</td><td>${esc(n.patient||'—')}</td><td>${noteTypeBadge(n.type)}</td><td><button class="btn" data-note-menu="${esc(n.id)}">Options</button></td></tr>`}).join(''))}</div></div>`}
   function addNote(existing){ensureNotes();const n=existing||{id:'N-'+Date.now(),type:'joy',text:'',patient:''};modal(existing?'Edit Note':'Add Note',`<div class="form-grid"><label class="field">Note type<select id="nType"><option value="joy" ${n.type==='joy'?'selected':''}>My Notes — VA Joy → Employer</option><option value="employer" ${n.type==='employer'?'selected':''}>Employer Notes — Employer → VA Joy</option><option value="shared" ${n.type==='shared'?'selected':''}>Shared Notes — visible to both</option></select></label><label class="field">Patient / record<select id="nPatient"><option value="">General note</option>${patients()}</select></label><label class="field full">Note<textarea id="nText" rows="7" placeholder="Write the note here..."></textarea></label></div>`,()=>{const text=$('#nText').value.trim();if(!text){toast('Note is required');return false}const item={id:n.id,type:$('#nType').value,text,patient:$('#nPatient').value||'',date:today()};if(existing){const i=db.notes.findIndex(x=>x.id===existing.id);if(i>-1)db.notes[i]=item;log('Note updated','Notes');toast('Note updated')}else{db.notes.unshift(item);log('Note added','Notes');toast('Note added')}save();render()},existing?'Update':'Save');if(n.patient)$('#nPatient').value=n.patient;$('#nText').value=n.text||''}
@@ -35,52 +35,45 @@
   function editRecord(kind,recordId){const item=db[kind]?.find(x=>x.id===recordId);if(!item)return;if(kind==='patients'){modal('Edit Patient',`<div class="form-grid"><label class="field">Patient name<input id="epName" value="${esc(item.name)}"></label><label class="field">Age<input id="epAge" type="number" value="${esc(item.age)}"></label><label class="field">Sex<select id="epSex"><option ${item.sex==='Female'?'selected':''}>Female</option><option ${item.sex==='Male'?'selected':''}>Male</option><option ${item.sex==='Other'?'selected':''}>Other</option><option ${item.sex==='Prefer not to say'?'selected':''}>Prefer not to say</option></select></label><label class="field">Status<select id="epStatus"><option ${item.status==='Active'?'selected':''}>Active</option><option ${item.status==='Follow-up'?'selected':''}>Follow-up</option><option ${item.status==='Pending'?'selected':''}>Pending</option></select></label></div>`,()=>{const name=$('#epName').value.trim();if(!name){toast('Patient name is required');return false}const old=item.name;item.name=name;item.age=$('#epAge').value;item.sex=$('#epSex').value;item.status=$('#epStatus').value;['appointments','tasks','followups','billing','insurance','documents','notes'].forEach(k=>(db[k]||[]).forEach(x=>{if(x.patient===old)x.patient=name}));log('Patient updated: '+name,'Patients');save();render();toast('Patient updated')});return}if(kind==='tasks'){modal('Edit Task',`<div class="form-grid"><label class="field">Task<input id="etTitle" value="${esc(item.title)}"></label><label class="field">Patient<select id="etPatient"><option value="${esc(item.patient||'')}">${esc(item.patient||'General')}</option>${patients()}</select></label><label class="field">Priority<select id="etPriority"><option ${item.priority==='High'?'selected':''}>High</option><option ${item.priority==='Medium'?'selected':''}>Medium</option><option ${item.priority==='Low'?'selected':''}>Low</option></select></label><label class="field">Status<select id="etStatus"><option ${item.status==='Open'?'selected':''}>Open</option><option ${item.status==='Completed'?'selected':''}>Completed</option></select></label></div>`,()=>{item.title=$('#etTitle').value.trim();if(!item.title){toast('Task title is required');return false}item.patient=$('#etPatient').value;item.priority=$('#etPriority').value;item.status=$('#etStatus').value;log('Task updated: '+item.title,'Tasks');save();render();toast('Task updated')});return}toast('This record can be deleted from Options. Editing for this record type will be expanded next.')}
   function deleteRecord(kind,recordId){if(!db[kind])return;if(!confirm('Delete this record?'))return;const item=db[kind].find(x=>x.id===recordId);db[kind]=db[kind].filter(x=>x.id!==recordId);log((item?.name||item?.title||item?.patient||'Record')+' deleted',kind);save();render();toast('Record deleted')}
   views.notes=notes;
-  function enhanceRecordNames(){const selectors=[['patients','[data-patient]'],['tasks','[data-complete-task]'],['appointments','[data-complete-appointment]'],['followups','[data-complete-followup]'],['billing','[data-paid]']];selectors.forEach(([kind,selector])=>document.querySelectorAll(selector).forEach(btn=>{const row=btn.closest('tr');if(!row)return;const cell=kind==='patients'?row.cells[1]:kind==='tasks'?row.cells[0]:row.cells[1];if(!cell||cell.querySelector('.record-name'))return;const recordId=btn.dataset.patient||btn.dataset.completeTask||btn.dataset.completeAppointment||btn.dataset.completeFollowup||btn.dataset.paid;const text=cell.textContent.trim();if(!recordId||!text)return;if(kind==='patients'){cell.innerHTML=`<button class="patient-name-link" data-patient="${esc(recordId)}">${esc(text)}</button>`}else{cell.innerHTML=`<button class="record-name" data-record-options="${esc(kind)}|${esc(recordId)}">${esc(text)}</button>`}}))}
-  const observer=new MutationObserver(enhanceRecordNames);observer.observe($('#content'),{childList:true,subtree:true});enhanceRecordNames();
+
+  /* Enhance existing record names without creating a MutationObserver loop. */
+  function enhanceRecordNames(){
+    const selectors=[['patients','[data-patient]'],['tasks','[data-complete-task]'],['appointments','[data-complete-appointment]'],['followups','[data-complete-followup]'],['billing','[data-paid]']];
+    selectors.forEach(([kind,selector])=>document.querySelectorAll(selector).forEach(btn=>{
+      const row=btn.closest('tr');if(!row)return;
+      const cell=kind==='patients'?row.cells[1]:kind==='tasks'?row.cells[0]:row.cells[1];if(!cell)return;
+      if(cell.querySelector('.record-name')||cell.querySelector('.patient-name-link'))return;
+      const recordId=btn.dataset.patient||btn.dataset.completeTask||btn.dataset.completeAppointment||btn.dataset.completeFollowup||btn.dataset.paid;
+      const text=cell.textContent.trim();if(!recordId||!text)return;
+      if(kind==='patients')cell.innerHTML=`<button class="patient-name-link" data-patient="${esc(recordId)}">${esc(text)}</button>`;
+      else cell.innerHTML=`<button class="record-name" data-record-options="${esc(kind)}|${esc(recordId)}">${esc(text)}</button>`;
+    }));
+  }
+
   function bindNoteFilter(){const f=$('#noteFilter');if(!f||f.dataset.bound)return;f.dataset.bound='1';f.addEventListener('change',()=>{const q=f.value;document.querySelectorAll('[data-note-row]').forEach(r=>r.style.display=q==='all'||r.classList.contains('note-row-'+q)?'':'none')})}
   document.addEventListener('click',e=>{
     const home=e.target.closest('#homePageBtn');
     if(home){e.preventDefault();e.stopImmediatePropagation();sessionStorage.removeItem('mva-authenticated-role');document.getElementById('authLanding')?.remove();document.body.classList.remove('auth-page');window.location.replace('./');return;}
-    const notification=e.target.closest('#notificationBtn');if(notification){e.preventDefault();e.stopImmediatePropagation();go('notes');return}const no=e.target.closest('[data-note-menu]');if(no){e.preventDefault();e.stopImmediatePropagation();noteOptions(no.dataset.noteMenu);return}const ro=e.target.closest('[data-record-options]');if(ro){e.preventDefault();e.stopImmediatePropagation();const [kind,recordId]=ro.dataset.recordOptions.split('|');recordOptions(kind,recordId);return}const add=e.target.closest('[data-action="add-note"]');if(add){e.preventDefault();e.stopImmediatePropagation();addNote();return}if(view==='notes')setTimeout(bindNoteFilter,0)},true);
-  render();bindNoteFilter();
+    const notification=e.target.closest('#notificationBtn');if(notification){e.preventDefault();e.stopImmediatePropagation();go('notes');return}
+    const no=e.target.closest('[data-note-menu]');if(no){e.preventDefault();e.stopImmediatePropagation();noteOptions(no.dataset.noteMenu);return}
+    const ro=e.target.closest('[data-record-options]');if(ro){e.preventDefault();e.stopImmediatePropagation();const [kind,recordId]=ro.dataset.recordOptions.split('|');recordOptions(kind,recordId);return}
+    const add=e.target.closest('[data-action="add-note"]');if(add){e.preventDefault();e.stopImmediatePropagation();addNote();return}
+    if(view==='notes')setTimeout(bindNoteFilter,0);
+  },true);
+
+  render();
+  bindNoteFilter();
 })();
 
-/* Simplified patient board: identity first, operational status at a glance, details inside View Actions. */
+/* Simplified patient board */
 (function(){
-  function latestForPatient(collection,name,sortKey){
-    const items=(db[collection]||[]).filter(x=>x.patient===name);
-    if(!items.length)return null;
-    if(!sortKey)return items[items.length-1];
-    return [...items].sort((a,b)=>String(b[sortKey]||'').localeCompare(String(a[sortKey]||'')))[0];
-  }
-  function compactAppointment(name){
-    const a=latestForPatient('appointments',name,'date');
-    if(!a)return '<span class="muted">No appointment</span>';
-    const date=a.date?new Date(a.date+'T00:00:00').toLocaleDateString(undefined,{month:'short',day:'numeric'}):'';
-    return `<b>${esc(a.type||'Appointment')}</b><br><span class="muted">${esc(date)}${a.time?' · '+esc(a.time):''}</span>`;
-  }
-  function compactInsurance(name){
-    const i=latestForPatient('insurance',name,'lastCheck');
-    return i?badge(i.status||'Pending'):'<span class="muted">Not entered</span>';
-  }
-  function compactBilling(name){
-    const items=(db.billing||[]).filter(x=>x.patient===name);
-    if(!items.length)return '<span class="muted">No billing</span>';
-    const open=items.filter(x=>!/^paid$/i.test(x.status||''));
-    const b=open[0]||items[items.length-1];
-    return `<b>₱${Number(b.amount||0).toLocaleString()}</b><br>${badge(b.status||'Pending')}`;
-  }
+  function latestForPatient(collection,name,sortKey){const items=(db[collection]||[]).filter(x=>x.patient===name);if(!items.length)return null;if(!sortKey)return items[items.length-1];return [...items].sort((a,b)=>String(b[sortKey]||'').localeCompare(String(a[sortKey]||'')))[0]}
+  function compactAppointment(name){const a=latestForPatient('appointments',name,'date');if(!a)return '<span class="muted">No appointment</span>';const date=a.date?new Date(a.date+'T00:00:00').toLocaleDateString(undefined,{month:'short',day:'numeric'}):'';return `<b>${esc(a.type||'Appointment')}</b><br><span class="muted">${esc(date)}${a.time?' · '+esc(a.time):''}</span>`}
+  function compactInsurance(name){const i=latestForPatient('insurance',name,'lastCheck');return i?badge(i.status||'Pending'):'<span class="muted">Not entered</span>'}
+  function compactBilling(name){const items=(db.billing||[]).filter(x=>x.patient===name);if(!items.length)return '<span class="muted">No billing</span>';const open=items.filter(x=>!/^paid$/i.test(x.status||''));const b=open[0]||items[items.length-1];return `<b>₱${Number(b.amount||0).toLocaleString()}</b><br>${badge(b.status||'Pending')}`}
   function simplifiedPatients(){
-    const rows=db.patients.map(p=>`<tr>
-      <td><button class="patient-name-link" data-patient="${esc(p.id)}">${esc(p.name)}</button></td>
-      <td>${esc(p.age||'—')}</td>
-      <td>${esc(p.sex||'—')}</td>
-      <td class="appointment-cell">${compactAppointment(p.name)}</td>
-      <td class="insurance-cell">${compactInsurance(p.name)}</td>
-      <td class="billing-cell">${compactBilling(p.name)}</td>
-      <td><button class="btn" data-record-options="patients|${esc(p.id)}">View Actions</button></td>
-    </tr>`).join('');
-    return head('Patients','At-a-glance patient overview.','＋ Add Patient','add-patient')+`<div class="toolbar"><input class="filter search-wide" id="patientSearch" placeholder="Search patients..."><select class="filter" id="patientStatus"><option>All statuses</option><option>Active</option><option>Follow-up</option><option>Pending</option></select></div><div class="card patient-board"><div class="table-scroll">${table(['Patient','Age','Gender','Appointment','Insurance','Billing','Action'],rows)}</div></div>`;
+    const rows=db.patients.map(p=>`<tr><td><button class="patient-name-link" data-patient="${esc(p.id)}">${esc(p.name)}</button></td><td>${esc(p.age||'—')}</td><td>${esc(p.sex||'—')}</td><td class="appointment-cell">${compactAppointment(p.name)}</td><td class="insurance-cell">${compactInsurance(p.name)}</td><td class="billing-cell">${compactBilling(p.name)}</td><td><button class="btn" data-record-options="patients|${esc(p.id)}">View Actions</button></td></tr>`).join('');
+    return head('Patients','At-a-glance patient overview.','＋ Add Patient','add-patient')+`<div class="toolbar"><input class="filter search-wide" id="patientSearch" placeholder="Search patients..."></div><div class="card patient-board"><div class="table-scroll">${table(['Patient','Age','Gender','Appointment','Insurance','Billing','Action'],rows)}</div></div>`;
   }
   views.patients=simplifiedPatients;
   render();
