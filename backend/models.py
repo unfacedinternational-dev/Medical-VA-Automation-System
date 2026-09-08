@@ -21,9 +21,9 @@ class Patient(Base):
 class Appointment(Base):
     __tablename__ = "appointments"
     id: Mapped[int] = mapped_column(primary_key=True)
-    patient_id: Mapped[int] = mapped_column(ForeignKey("patients.id"))
-    scheduled_for: Mapped[datetime] = mapped_column(DateTime)
-    status: Mapped[str] = mapped_column(String(30), default="APPROACHING")
+    patient_id: Mapped[int] = mapped_column(ForeignKey("patients.id"), index=True)
+    scheduled_for: Mapped[datetime] = mapped_column(DateTime, index=True)
+    status: Mapped[str] = mapped_column(String(30), default="APPROACHING", index=True)
     provider: Mapped[str | None] = mapped_column(String(200), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     patient = relationship("Patient", back_populates="appointments")
@@ -31,16 +31,17 @@ class Appointment(Base):
 class Billing(Base):
     __tablename__ = "billing"
     id: Mapped[int] = mapped_column(primary_key=True)
-    patient_id: Mapped[int] = mapped_column(ForeignKey("patients.id"))
+    patient_id: Mapped[int] = mapped_column(ForeignKey("patients.id"), index=True)
     amount: Mapped[int] = mapped_column(Integer)
-    status: Mapped[str] = mapped_column(String(30), default="WAITING")
+    status: Mapped[str] = mapped_column(String(30), default="WAITING", index=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    received_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
     patient = relationship("Patient", back_populates="billings")
 
 class Insurance(Base):
     __tablename__ = "insurance"
     id: Mapped[int] = mapped_column(primary_key=True)
-    patient_id: Mapped[int] = mapped_column(ForeignKey("patients.id"))
+    patient_id: Mapped[int] = mapped_column(ForeignKey("patients.id"), index=True)
     provider: Mapped[str] = mapped_column(String(200))
     policy_number: Mapped[str | None] = mapped_column(String(200), nullable=True)
     group_number: Mapped[str | None] = mapped_column(String(200), nullable=True)
@@ -53,21 +54,21 @@ class Insurance(Base):
 class Task(Base):
     __tablename__ = "tasks"
     id: Mapped[int] = mapped_column(primary_key=True)
-    patient_id: Mapped[int | None] = mapped_column(ForeignKey("patients.id"), nullable=True)
+    patient_id: Mapped[int | None] = mapped_column(ForeignKey("patients.id"), nullable=True, index=True)
     title: Mapped[str] = mapped_column(String(200))
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    due_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    status: Mapped[str] = mapped_column(String(30), default="OPEN")
+    due_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    status: Mapped[str] = mapped_column(String(30), default="OPEN", index=True)
     patient = relationship("Patient", back_populates="tasks")
 
 class FollowUp(Base):
     __tablename__ = "followups"
     id: Mapped[int] = mapped_column(primary_key=True)
-    patient_id: Mapped[int] = mapped_column(ForeignKey("patients.id"))
+    patient_id: Mapped[int] = mapped_column(ForeignKey("patients.id"), index=True)
     reason: Mapped[str] = mapped_column(String(250))
-    followup_date: Mapped[datetime] = mapped_column(DateTime)
+    followup_date: Mapped[datetime] = mapped_column(DateTime, index=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
-    status: Mapped[str] = mapped_column(String(30), default="Upcoming")
+    status: Mapped[str] = mapped_column(String(30), default="Upcoming", index=True)
     patient = relationship("Patient", back_populates="followups")
 
 class Note(Base):
@@ -90,7 +91,7 @@ class PatientDocument(Base):
     content_type: Mapped[str | None] = mapped_column(String(120), nullable=True)
     file_size: Mapped[int] = mapped_column(Integer)
     uploaded_by: Mapped[str] = mapped_column(String(30))
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
     patient = relationship("Patient", back_populates="documents")
 
 class Activity(Base):
@@ -100,4 +101,4 @@ class Activity(Base):
     action: Mapped[str] = mapped_column(String(200))
     entity_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
     entity_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
