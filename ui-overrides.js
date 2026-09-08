@@ -33,6 +33,17 @@
   function enhanceRecordNames(){const selectors=[['patients','[data-patient]'],['tasks','[data-complete-task]'],['appointments','[data-complete-appointment]'],['followups','[data-complete-followup]'],['billing','[data-paid]']];selectors.forEach(([kind,selector])=>document.querySelectorAll(selector).forEach(btn=>{const row=btn.closest('tr');if(!row)return;const cell=kind==='patients'?row.cells[1]:kind==='tasks'?row.cells[0]:row.cells[1];if(!cell||cell.querySelector('.record-name'))return;const recordId=btn.dataset.patient||btn.dataset.completeTask||btn.dataset.completeAppointment||btn.dataset.completeFollowup||btn.dataset.paid;const text=cell.textContent.trim();if(!recordId||!text)return;cell.innerHTML=`<button class="record-name" data-record-options="${esc(kind)}|${esc(recordId)}">${esc(text)}</button>`}))}
   const observer=new MutationObserver(enhanceRecordNames);observer.observe($('#content'),{childList:true,subtree:true});enhanceRecordNames();
   function bindNoteFilter(){const f=$('#noteFilter');if(!f||f.dataset.bound)return;f.dataset.bound='1';f.addEventListener('change',()=>{const q=f.value;document.querySelectorAll('[data-note-row]').forEach(r=>r.style.display=q==='all'||r.classList.contains('note-row-'+q)?'':'none')})}
-  document.addEventListener('click',e=>{const home=e.target.closest('#homePageBtn');if(home){e.preventDefault();window.location.href='./';return}const notification=e.target.closest('#notificationBtn');if(notification){e.preventDefault();e.stopImmediatePropagation();go('notes');return}const no=e.target.closest('[data-note-menu]');if(no){e.preventDefault();e.stopImmediatePropagation();noteOptions(no.dataset.noteMenu);return}const ro=e.target.closest('[data-record-options]');if(ro){e.preventDefault();e.stopImmediatePropagation();const [kind,recordId]=ro.dataset.recordOptions.split('|');recordOptions(kind,recordId);return}const add=e.target.closest('[data-action="add-note"]');if(add){e.preventDefault();e.stopImmediatePropagation();addNote();return}if(view==='notes')setTimeout(bindNoteFilter,0)},true);
+  document.addEventListener('click',e=>{
+    const home=e.target.closest('#homePageBtn');
+    if(home){
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      sessionStorage.removeItem('mva-authenticated-role');
+      document.getElementById('authLanding')?.remove();
+      document.body.classList.remove('auth-page');
+      window.location.replace('./');
+      return;
+    }
+    const notification=e.target.closest('#notificationBtn');if(notification){e.preventDefault();e.stopImmediatePropagation();go('notes');return}const no=e.target.closest('[data-note-menu]');if(no){e.preventDefault();e.stopImmediatePropagation();noteOptions(no.dataset.noteMenu);return}const ro=e.target.closest('[data-record-options]');if(ro){e.preventDefault();e.stopImmediatePropagation();const [kind,recordId]=ro.dataset.recordOptions.split('|');recordOptions(kind,recordId);return}const add=e.target.closest('[data-action="add-note"]');if(add){e.preventDefault();e.stopImmediatePropagation();addNote();return}if(view==='notes')setTimeout(bindNoteFilter,0)},true);
   render();bindNoteFilter();
 })();
