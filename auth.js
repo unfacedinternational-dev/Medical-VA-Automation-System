@@ -15,7 +15,7 @@ function showLanding(){
       <div class="auth-personal"><span>PERSONALIZED FOR</span><strong>VA Joy N.</strong><p>This workspace is tailored for Joy's medical VA workflow and designed to help her and her employer work with one organized operational system.</p></div>
       <div class="auth-actions"><button class="auth-primary" id="howItWorks">How this system works <span>→</span></button></div>
       <div class="auth-access">
-        <div class="access-card"><div class="access-icon">VA</div><div><h2>Are you VA Joy?</h2><p>Use the authorized VA account to access the workspace.</p></div><button class="auth-secondary" id="joyLogin">Enter as VA Joy</button></div>
+        <div class="access-card"><div class="access-icon">VA</div><div><h2>Welcome Back VA Joy!</h2><p>Use the authorized VA account to access the workspace.</p></div><button class="auth-secondary" id="joyLogin">Enter as VA Joy</button></div>
         <div class="access-card"><div class="access-icon">EM</div><div><h2>Are you Joy's employer?</h2><p>Use employer access to enter the operational workspace.</p></div><button class="auth-secondary" id="employerLogin">Enter as Employer</button></div>
       </div>
       <p class="auth-note">Access credentials are intentionally not embedded in this public GitHub Pages source. Secure server-side authentication should be used before real patient information is entered.</p>
