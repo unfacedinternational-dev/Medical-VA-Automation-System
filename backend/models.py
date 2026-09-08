@@ -16,6 +16,7 @@ class Patient(Base):
     tasks = relationship("Task", back_populates="patient", cascade="all, delete-orphan")
     followups = relationship("FollowUp", back_populates="patient", cascade="all, delete-orphan")
     notes = relationship("Note", back_populates="patient", cascade="all, delete-orphan")
+    documents = relationship("PatientDocument", back_populates="patient", cascade="all, delete-orphan")
 
 class Appointment(Base):
     __tablename__ = "appointments"
@@ -79,6 +80,18 @@ class Note(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     patient = relationship("Patient", back_populates="notes")
+
+class PatientDocument(Base):
+    __tablename__ = "patient_documents"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    patient_id: Mapped[int] = mapped_column(ForeignKey("patients.id"), index=True)
+    original_name: Mapped[str] = mapped_column(String(300))
+    stored_name: Mapped[str] = mapped_column(String(300), unique=True)
+    content_type: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    file_size: Mapped[int] = mapped_column(Integer)
+    uploaded_by: Mapped[str] = mapped_column(String(30))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    patient = relationship("Patient", back_populates="documents")
 
 class Activity(Base):
     __tablename__ = "activity"
