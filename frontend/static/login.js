@@ -1,4 +1,11 @@
 const form=document.getElementById('loginForm'),username=document.getElementById('username'),password=document.getElementById('password'),title=document.getElementById('loginTitle'),error=document.getElementById('loginError');
+const workflowModal=document.getElementById('workflowModal');
+const openWorkflow=document.getElementById('howAutomation');
+const closeWorkflow=document.getElementById('closeWorkflow');
+openWorkflow?.addEventListener('click',()=>workflowModal?.classList.remove('modal-hidden'));
+closeWorkflow?.addEventListener('click',()=>workflowModal?.classList.add('modal-hidden'));
+workflowModal?.addEventListener('click',e=>{if(e.target===workflowModal)workflowModal.classList.add('modal-hidden')});
+document.addEventListener('keydown',e=>{if(e.key==='Escape')workflowModal?.classList.add('modal-hidden')});
 document.querySelectorAll('.login-card').forEach(card=>card.addEventListener('click',()=>{username.value=card.dataset.role==='va'?'va_joy':'employer';title.textContent=card.dataset.role==='va'?'Sign in as VA Joy':'Sign in as Employer';form.hidden=false;password.value='';error.textContent='';password.focus()}));
 document.getElementById('cancelLogin').addEventListener('click',()=>form.hidden=true);
-form.addEventListener('submit',async e=>{e.preventDefault();error.textContent='';try{const r=await fetch('/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:username.value,password:password.value})});if(!r.ok){error.textContent='Invalid username or password.';return}location.href='/dashboard'}catch(_){error.textContent='Unable to connect to the server.'}});
+form.addEventListener('submit',async e=>{e.preventDefault();error.textContent='';try{const r=await fetch('/login',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({username:username.value,password:password.value})});if(!r.ok){let message='Invalid username or password.';try{const data=await r.json();if(data.detail)message=data.detail}catch(_){}error.textContent=message;return}location.href='/dashboard'}catch(_){error.textContent='Unable to connect to the server.'}});
