@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from sqlalchemy import func, text
+from sqlalchemy import func, text, inspect
 from sqlalchemy.orm import Session, selectinload
 from .database import Base, engine, get_db
 from .models import Patient, Appointment, Billing, Insurance, Task, FollowUp, Note, Activity, PatientDocument
@@ -22,10 +22,16 @@ MAX_FILE_SIZE=25*1024*1024
 ALLOWED_EXTENSIONS={".pdf",".png",".jpg",".jpeg",".gif",".webp",".doc",".docx",".xls",".xlsx",".txt"}
 INLINE_TYPES={"application/pdf","image/png","image/jpeg","image/gif","image/webp"}
 Base.metadata.create_all(bind=engine)
-with engine.begin() as conn:
-    cols={row[1] for row in conn.execute(text("PRAGMA table_info(billing)"))}
-    if "received_at" not in cols:
-        conn.execute(text("ALTER TABLE billing ADD COLUMN received_at DATETIME"))
+
+# Keep the small legacy schema compatibility check, but make it work with both
+# SQLite (local development) and PostgreSQL/Supabase (production).
+inspector = inspect(engine)
+if inspector.has_table("billing") and "received_at" not in {c["name"] for c in inspector.get_columns("billing")}:
+    with engine.begin() as conn:
+        if engine.dialect.name == "sqlite":
+            conn.execute(text("ALTER TABLE billing ADD COLUMN received_at DATETIME"))
+        else:
+            conn.execute(text("ALTER TABLE billing ADD COLUMN received_at TIMESTAMP"))
 
 app=FastAPI(title="Medical VA Automation System")
 app.add_middleware(CORSMiddleware,allow_origins=os.environ.get("MEDICAL_VA_ALLOWED_ORIGIN","").split(",") if os.environ.get("MEDICAL_VA_ALLOWED_ORIGIN") else [],allow_credentials=True,allow_methods=["GET","POST","PATCH","DELETE"],allow_headers=["Content-Type"])
