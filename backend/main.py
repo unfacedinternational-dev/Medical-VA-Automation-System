@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, selectinload
 from .database import Base, engine, get_db
 from .models import Patient, Appointment, Billing, Insurance, Task, FollowUp, Note, Activity, PatientDocument
 from .crud import patient_detail, patient_summary, appointment_status, task_status, followup_status, log
@@ -26,15 +26,12 @@ app.add_middleware(CORSMiddleware,allow_origins=os.environ.get("MEDICAL_VA_ALLOW
 app.mount("/static",StaticFiles(directory=str(FRONTEND/"static")),name="static")
 
 def current_user(request:Request):
-    token=request.cookies.get("medical_va_token")
-    username=decode_access_token(token) if token else None
+    token=request.cookies.get("medical_va_token");username=decode_access_token(token) if token else None
     if username not in USERS: raise HTTPException(401,"Authentication required")
-    return USERS[username] | {"username":username}
-
+    return USERS[username]|{"username":username}
 def require_va(user=Depends(current_user)):
     if user["role"]!="va": raise HTTPException(403,"VA access required")
     return user
-
 class LoginRequest(BaseModel): username:str; password:str
 class PatientCreate(BaseModel): full_name:str=Field(min_length=2,max_length=200); age:int=Field(ge=0,le=130); gender:str=Field(min_length=1,max_length=50)
 class AppointmentCreate(BaseModel): scheduled_for:datetime; provider:str|None=None; notes:str|None=None
@@ -43,9 +40,7 @@ class InsuranceCreate(BaseModel): provider:str; policy_number:str|None=None; gro
 class TaskCreate(BaseModel): title:str=Field(min_length=1,max_length=200); description:str|None=None; due_date:datetime|None=None; status:str="OPEN"
 class FollowUpCreate(BaseModel): reason:str=Field(min_length=1,max_length=250); followup_date:datetime; notes:str|None=None
 class NoteCreate(BaseModel): note_type:str; content:str=Field(min_length=1)
-
 def document_payload(x): return {"id":x.id,"original_name":x.original_name,"content_type":x.content_type,"file_size":x.file_size,"uploaded_by":x.uploaded_by,"created_at":x.created_at,"view_url":f"/documents/{x.id}/view","download_url":f"/documents/{x.id}/download"}
-
 @app.get("/",response_class=HTMLResponse)
 def home(): return (FRONTEND/"templates"/"index.html").read_text(encoding="utf-8")
 @app.get("/dashboard",response_class=HTMLResponse)
@@ -53,25 +48,22 @@ def dashboard(user=Depends(current_user)): return (FRONTEND/"static"/"dashboard.
 @app.post("/login")
 def login(data:LoginRequest,response:Response):
     if data.username not in USERS or not verify_user(data.username,data.password): raise HTTPException(401,"Invalid username or password")
-    token=create_access_token(data.username)
-    response.set_cookie("medical_va_token",token,max_age=8*60*60,httponly=True,samesite="lax",secure=os.environ.get("MEDICAL_VA_SECURE_COOKIE","1")!="0",path="/")
-    return {"username":data.username,"display_name":USERS[data.username]["display_name"],"role":USERS[data.username]["role"]}
+    response.set_cookie("medical_va_token",create_access_token(data.username),max_age=8*60*60,httponly=True,samesite="lax",secure=os.environ.get("MEDICAL_VA_SECURE_COOKIE","1")!="0",path="/");return {"username":data.username,"display_name":USERS[data.username]["display_name"],"role":USERS[data.username]["role"]}
 @app.post("/logout")
-def logout(response:Response): response.delete_cookie("medical_va_token",path="/"); return {"ok":True}
+def logout(response:Response): response.delete_cookie("medical_va_token",path="/");return {"ok":True}
 @app.get("/me")
 def me(user=Depends(current_user)): return {"username":user["username"],"display_name":user["display_name"],"role":user["role"]}
 @app.get("/health")
 def health(): return {"status":"ok"}
-
 @app.post("/patients")
 def create_patient(data:PatientCreate,db:Session=Depends(get_db),user=Depends(require_va)):
     patient=Patient(**data.model_dump());db.add(patient);db.flush();log(db,"va","Added patient","patient",patient.id);db.commit();db.refresh(patient);return patient_summary(patient)
 @app.get("/patients")
 def list_patients(db:Session=Depends(get_db),user=Depends(current_user)):
-    patients=db.query(Patient).options(joinedload(Patient.appointments),joinedload(Patient.billings),joinedload(Patient.insurances)).all();return [patient_summary(p) for p in patients]
+    patients=db.query(Patient).options(selectinload(Patient.appointments),selectinload(Patient.billings),selectinload(Patient.insurances)).all();return [patient_summary(p) for p in patients]
 @app.get("/patients/{patient_id}")
 def patient_record(patient_id:int,db:Session=Depends(get_db),user=Depends(current_user)):
-    p=db.query(Patient).options(joinedload(Patient.appointments),joinedload(Patient.billings),joinedload(Patient.insurances),joinedload(Patient.tasks),joinedload(Patient.followups),joinedload(Patient.notes),joinedload(Patient.documents)).filter(Patient.id==patient_id).first()
+    p=db.query(Patient).options(selectinload(Patient.appointments),selectinload(Patient.billings),selectinload(Patient.insurances),selectinload(Patient.tasks),selectinload(Patient.followups),selectinload(Patient.notes),selectinload(Patient.documents)).filter(Patient.id==patient_id).first()
     if not p: raise HTTPException(404,"Patient not found")
     return patient_detail(p)
 @app.post("/patients/{patient_id}/appointments")
@@ -112,7 +104,6 @@ def add_note(patient_id:int,data:NoteCreate,db:Session=Depends(get_db),user=Depe
     if data.note_type not in {"MY NOTES","EMPLOYER NOTES","SHARED NOTES"}: raise HTTPException(400,"Invalid note type")
     if data.note_type!="SHARED NOTES" and data.note_type!=allowed[user["role"]]: raise HTTPException(403,"You cannot create this note type")
     item=Note(patient_id=patient_id,author_role=user["role"],note_type=data.note_type,content=data.content);db.add(item);db.flush();log(db,user["role"],"Added note","note",item.id);db.commit();db.refresh(item);return item
-
 @app.get("/patients/{patient_id}/documents")
 def list_documents(patient_id:int,db:Session=Depends(get_db),user=Depends(current_user)):
     if not db.get(Patient,patient_id): raise HTTPException(404,"Patient not found")
@@ -134,10 +125,10 @@ def get_document(document_id,db):
     return item,path
 @app.get("/documents/{document_id}/view")
 def view_document(document_id:int,db:Session=Depends(get_db),user=Depends(current_user)):
-    item,path=get_document(document_id,db);disposition="inline" if item.content_type in INLINE_TYPES else "attachment";return FileResponse(path,media_type=item.content_type or "application/octet-stream",filename=item.original_name,content_disposition_type=disposition)
+    item,path=get_document(document_id,db);return FileResponse(path,media_type=item.content_type or "application/octet-stream",filename=item.original_name,content_disposition_type="inline" if item.content_type in INLINE_TYPES else "attachment")
 @app.get("/documents/{document_id}/download")
 def download_document(document_id:int,db:Session=Depends(get_db),user=Depends(current_user)):
-    item,path=get_document(document_id);return FileResponse(path,media_type=item.content_type or "application/octet-stream",filename=item.original_name)
+    item,path=get_document(document_id,db);return FileResponse(path,media_type=item.content_type or "application/octet-stream",filename=item.original_name)
 @app.delete("/documents/{document_id}")
 def delete_document(document_id:int,db:Session=Depends(get_db),user=Depends(require_va)):
     item,path=get_document(document_id,db);name=item.original_name;patient_id=item.patient_id;path.unlink();db.delete(item);log(db,user["role"],f"Deleted document {name}","document",document_id);db.commit();return {"deleted":True,"patient_id":patient_id}
