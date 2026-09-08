@@ -2,9 +2,10 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 import os
+import httpx
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import HTMLResponse, Response as FastAPIResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import func, text, inspect
@@ -21,14 +22,18 @@ STORAGE_ROOT.mkdir(parents=True,exist_ok=True)
 MAX_FILE_SIZE=25*1024*1024
 ALLOWED_EXTENSIONS={".pdf",".png",".jpg",".jpeg",".gif",".webp",".doc",".docx",".xls",".xlsx",".txt"}
 INLINE_TYPES={"application/pdf","image/png","image/jpeg","image/gif","image/webp"}
+SUPABASE_URL=os.environ.get("SUPABASE_URL","").rstrip("/")
+SUPABASE_SECRET_KEY=os.environ.get("SUPABASE_SECRET_KEY","")
+SUPABASE_BUCKET=os.environ.get("SUPABASE_STORAGE_BUCKET","medical-documents")
+SUPABASE_STORAGE_ENABLED=bool(SUPABASE_URL and SUPABASE_SECRET_KEY)
 Base.metadata.create_all(bind=engine)
 
 # Keep the small legacy schema compatibility check, but make it work with both
 # SQLite (local development) and PostgreSQL/Supabase (production).
-inspector = inspect(engine)
+inspector=inspect(engine)
 if inspector.has_table("billing") and "received_at" not in {c["name"] for c in inspector.get_columns("billing")}:
     with engine.begin() as conn:
-        if engine.dialect.name == "sqlite":
+        if engine.dialect.name=="sqlite":
             conn.execute(text("ALTER TABLE billing ADD COLUMN received_at DATETIME"))
         else:
             conn.execute(text("ALTER TABLE billing ADD COLUMN received_at TIMESTAMP"))
@@ -44,6 +49,50 @@ def current_user(request:Request):
 def require_va(user=Depends(current_user)):
     if user["role"]!="va": raise HTTPException(403,"VA access required")
     return user
+
+def require_storage():
+    if os.environ.get("VERCEL") and not SUPABASE_STORAGE_ENABLED:
+        raise HTTPException(500,"Supabase Storage is not configured. Add SUPABASE_URL and SUPABASE_SECRET_KEY to the server environment.")
+
+def storage_headers(content_type=None):
+    headers={"Authorization":f"Bearer {SUPABASE_SECRET_KEY}","apikey":SUPABASE_SECRET_KEY}
+    if content_type: headers["Content-Type"]=content_type
+    return headers
+
+def storage_upload(path,data,content_type):
+    require_storage()
+    if not SUPABASE_STORAGE_ENABLED:
+        local=STORAGE_ROOT/path;local.parent.mkdir(parents=True,exist_ok=True);local.write_bytes(data);return
+    url=f"{SUPABASE_URL}/storage/v1/object/{SUPABASE_BUCKET}/{path}"
+    headers=storage_headers(content_type);headers["x-upsert"]="false"
+    with httpx.Client(timeout=60.0) as client:
+        r=client.post(url,headers=headers,content=data)
+    if r.status_code>=300: raise HTTPException(502,f"Supabase Storage upload failed: {r.text[:300]}")
+
+def storage_download(path):
+    require_storage()
+    if not SUPABASE_STORAGE_ENABLED:
+        local=STORAGE_ROOT/path
+        if not local.is_file(): raise HTTPException(404,"Stored file not found")
+        return local.read_bytes()
+    url=f"{SUPABASE_URL}/storage/v1/object/{SUPABASE_BUCKET}/{path}"
+    with httpx.Client(timeout=60.0) as client:
+        r=client.get(url,headers=storage_headers())
+    if r.status_code==404: raise HTTPException(404,"Stored file not found")
+    if r.status_code>=300: raise HTTPException(502,f"Supabase Storage download failed: {r.text[:300]}")
+    return r.content
+
+def storage_delete(path):
+    require_storage()
+    if not SUPABASE_STORAGE_ENABLED:
+        local=STORAGE_ROOT/path
+        if local.is_file(): local.unlink()
+        return
+    url=f"{SUPABASE_URL}/storage/v1/object/{SUPABASE_BUCKET}/{path}"
+    with httpx.Client(timeout=60.0) as client:
+        r=client.delete(url,headers=storage_headers())
+    if r.status_code not in {200,204}: raise HTTPException(502,f"Supabase Storage delete failed: {r.text[:300]}")
+
 class LoginRequest(BaseModel): username:str; password:str
 class PatientCreate(BaseModel): full_name:str=Field(min_length=2,max_length=200); age:int=Field(ge=0,le=130); gender:str=Field(min_length=1,max_length=50)
 class PatientUpdate(PatientCreate): pass
@@ -68,7 +117,7 @@ def logout(response:Response): response.delete_cookie("medical_va_token",path="/
 @app.get("/me")
 def me(user=Depends(current_user)): return {"username":user["username"],"display_name":user["display_name"],"role":user["role"]}
 @app.get("/health")
-def health(): return {"status":"ok"}
+def health(): return {"status":"ok","database":engine.dialect.name,"storage":"supabase" if SUPABASE_STORAGE_ENABLED else "local"}
 
 @app.get("/dashboard/analytics")
 def dashboard_analytics(date:str|None=None,db:Session=Depends(get_db),user=Depends(current_user)):
@@ -109,11 +158,8 @@ def update_patient(patient_id:int,data:PatientUpdate,db:Session=Depends(get_db),
 def delete_patient(patient_id:int,db:Session=Depends(get_db),user=Depends(require_va)):
     patient=db.get(Patient,patient_id)
     if not patient: raise HTTPException(404,"Patient not found")
-    name=patient.full_name;patient_dir=STORAGE_ROOT/str(patient_id)
-    if patient_dir.exists():
-        for path in patient_dir.iterdir():
-            if path.is_file(): path.unlink()
-        patient_dir.rmdir()
+    name=patient.full_name
+    for doc in db.query(PatientDocument).filter(PatientDocument.patient_id==patient_id).all(): storage_delete(doc.stored_name)
     db.delete(patient);log(db,"va",f"Deleted patient {name}","patient",patient_id);db.commit();return {"deleted":True,"patient_id":patient_id}
 @app.post("/patients/{patient_id}/appointments")
 def add_appointment(patient_id:int,data:AppointmentCreate,db:Session=Depends(get_db),user=Depends(require_va)):
@@ -127,7 +173,7 @@ def complete_appointment(patient_id:int,appointment_id:int,db:Session=Depends(ge
 @app.post("/patients/{patient_id}/billing")
 def add_billing(patient_id:int,data:BillingCreate,db:Session=Depends(get_db),user=Depends(require_va)):
     if not db.get(Patient,patient_id): raise HTTPException(404,"Patient not found")
-    item=Billing(patient_id=patient_id,**data.model_dump());
+    item=Billing(patient_id=patient_id,**data.model_dump())
     if item.status=="PAID": item.received_at=datetime.now()
     db.add(item);db.flush();log(db,"va","Created billing record","billing",item.id);db.commit();db.refresh(item);return item
 @app.patch("/patients/{patient_id}/billing/{billing_id}")
@@ -166,23 +212,31 @@ async def upload_document(patient_id:int,file:UploadFile=File(...),db:Session=De
     if ext not in ALLOWED_EXTENSIONS: raise HTTPException(400,"Unsupported file type")
     data=await file.read()
     if len(data)>MAX_FILE_SIZE: raise HTTPException(413,"File exceeds 25 MB limit")
-    stored_name=f"{uuid4().hex}{ext}";patient_dir=STORAGE_ROOT/str(patient_id);patient_dir.mkdir(parents=True,exist_ok=True);(patient_dir/stored_name).write_bytes(data)
-    item=PatientDocument(patient_id=patient_id,original_name=original_name,stored_name=f"{patient_id}/{stored_name}",content_type=file.content_type,file_size=len(data),uploaded_by=user["role"]);db.add(item);db.flush();log(db,user["role"],f"Uploaded document {original_name}","document",item.id);db.commit();db.refresh(item);return document_payload(item)
+    stored_name=f"{uuid4().hex}{ext}";storage_path=f"{patient_id}/{stored_name}"
+    storage_upload(storage_path,data,file.content_type or "application/octet-stream")
+    try:
+        item=PatientDocument(patient_id=patient_id,original_name=original_name,stored_name=storage_path,content_type=file.content_type,file_size=len(data),uploaded_by=user["role"]);db.add(item);db.flush();log(db,user["role"],f"Uploaded document {original_name}","document",item.id);db.commit();db.refresh(item);return document_payload(item)
+    except Exception:
+        try: storage_delete(storage_path)
+        except Exception: pass
+        db.rollback();raise
+
 def get_document(document_id,db):
     item=db.get(PatientDocument,document_id)
     if not item: raise HTTPException(404,"Document not found")
-    path=STORAGE_ROOT/item.stored_name
-    if not path.is_file(): raise HTTPException(404,"Stored file not found")
-    return item,path
+    return item
 @app.get("/documents/{document_id}/view")
 def view_document(document_id:int,db:Session=Depends(get_db),user=Depends(current_user)):
-    item,path=get_document(document_id,db);return FileResponse(path,media_type=item.content_type or "application/octet-stream",filename=item.original_name,content_disposition_type="inline" if item.content_type in INLINE_TYPES else "attachment")
+    item=get_document(document_id,db);data=storage_download(item.stored_name)
+    disposition="inline" if item.content_type in INLINE_TYPES else "attachment"
+    return FastAPIResponse(content=data,media_type=item.content_type or "application/octet-stream",headers={"Content-Disposition":f'{disposition}; filename="{item.original_name}"'})
 @app.get("/documents/{document_id}/download")
 def download_document(document_id:int,db:Session=Depends(get_db),user=Depends(current_user)):
-    item,path=get_document(document_id,db);return FileResponse(path,media_type=item.content_type or "application/octet-stream",filename=item.original_name)
+    item=get_document(document_id,db);data=storage_download(item.stored_name)
+    return FastAPIResponse(content=data,media_type=item.content_type or "application/octet-stream",headers={"Content-Disposition":f'attachment; filename="{item.original_name}"'})
 @app.delete("/documents/{document_id}")
 def delete_document(document_id:int,db:Session=Depends(get_db),user=Depends(require_va)):
-    item,path=get_document(document_id,db);name=item.original_name;patient_id=item.patient_id;path.unlink();db.delete(item);log(db,user["role"],f"Deleted document {name}","document",document_id);db.commit();return {"deleted":True,"patient_id":patient_id}
+    item=get_document(document_id,db);name=item.original_name;patient_id=item.patient_id;storage_delete(item.stored_name);db.delete(item);log(db,user["role"],f"Deleted document {name}","document",document_id);db.commit();return {"deleted":True,"patient_id":patient_id}
 @app.get("/activity")
 def activity(db:Session=Depends(get_db),user=Depends(current_user)): return db.query(Activity).order_by(Activity.created_at.desc()).limit(200).all()
 @app.get("/reports/summary")
