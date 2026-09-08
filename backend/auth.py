@@ -13,6 +13,10 @@ USERS = {
     "employer": {"display_name": "Employer", "role": "employer", "password_hash_env": "EMPLOYER_PASSWORD_HASH"},
 }
 
+# Temporary simple login fallback for the current private demo/workspace.
+# Both accounts can use 2026 without requiring local password-hash generation.
+DEFAULT_LOGIN_PASSWORD = "2026"
+
 def _secret():
     if not SECRET_KEY or SECRET_KEY == "CHANGE_THIS_IN_SERVER_ENVIRONMENT":
         raise RuntimeError("MEDICAL_VA_SECRET_KEY is not configured")
@@ -20,15 +24,25 @@ def _secret():
 
 def _password_hash(username: str):
     user = USERS.get(username)
-    if not user: return None
+    if not user:
+        return None
     return os.environ.get(user["password_hash_env"])
 
 def hash_password(password: str) -> str:
     return pwd_context.hash(password)
 
 def verify_user(username: str, password: str) -> bool:
+    if username not in USERS:
+        return False
+    # Keep Vercel hashes working when configured, while allowing the current
+    # simple 2026 login so VA Joy and Employer can enter without setup commands.
     stored = _password_hash(username)
-    return bool(stored and pwd_context.verify(password, stored))
+    if stored:
+        try:
+            return bool(pwd_context.verify(password, stored))
+        except Exception:
+            return password == DEFAULT_LOGIN_PASSWORD
+    return password == DEFAULT_LOGIN_PASSWORD
 
 def create_access_token(subject: str, minutes: int = 480) -> str:
     expire = datetime.now(timezone.utc) + timedelta(minutes=minutes)
