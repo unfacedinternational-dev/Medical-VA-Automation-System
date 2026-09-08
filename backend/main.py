@@ -22,7 +22,6 @@ MAX_FILE_SIZE=25*1024*1024
 ALLOWED_EXTENSIONS={".pdf",".png",".jpg",".jpeg",".gif",".webp",".doc",".docx",".xls",".xlsx",".txt"}
 INLINE_TYPES={"application/pdf","image/png","image/jpeg","image/gif","image/webp"}
 Base.metadata.create_all(bind=engine)
-# Keep existing SQLite installations compatible when the payment date field is introduced.
 with engine.begin() as conn:
     cols={row[1] for row in conn.execute(text("PRAGMA table_info(billing)"))}
     if "received_at" not in cols:
@@ -41,7 +40,7 @@ def require_va(user=Depends(current_user)):
     return user
 class LoginRequest(BaseModel): username:str; password:str
 class PatientCreate(BaseModel): full_name:str=Field(min_length=2,max_length=200); age:int=Field(ge=0,le=130); gender:str=Field(min_length=1,max_length=50)
-class PatientUpdate(BaseModel): full_name:str=Field(min_length=2,max_length=200); age:int=Field(ge=0,le=130); gender:str=Field(min_length=1,max_length=50)
+class PatientUpdate(PatientCreate): pass
 class AppointmentCreate(BaseModel): scheduled_for:datetime; provider:str|None=None; notes:str|None=None
 class BillingCreate(BaseModel): amount:int=Field(ge=0); status:str="WAITING"; description:str|None=None
 class InsuranceCreate(BaseModel): provider:str; policy_number:str|None=None; group_number:str|None=None; eligibility:str|None=None; verification_date:datetime|None=None; status:str="WAITING FOR VERIFICATION"; notes:str|None=None
@@ -56,7 +55,8 @@ def dashboard(user=Depends(current_user)): return (FRONTEND/"static"/"dashboard.
 @app.post("/login")
 def login(data:LoginRequest,response:Response):
     if data.username not in USERS or not verify_user(data.username,data.password): raise HTTPException(401,"Invalid username or password")
-    response.set_cookie("medical_va_token",create_access_token(data.username),max_age=8*60*60,httponly=True,samesite="lax",secure=os.environ.get("MEDICAL_VA_SECURE_COOKIE","1")!="0",path="/");return {"username":data.username,"display_name":USERS[data.username]["display_name"],"role":USERS[data.username]["role"]}
+    response.set_cookie("medical_va_token",create_access_token(data.username),max_age=8*60*60,httponly=True,samesite="lax",secure=os.environ.get("MEDICAL_VA_SECURE_COOKIE","1")!="0",path="/")
+    return {"username":data.username,"display_name":USERS[data.username]["display_name"],"role":USERS[data.username]["role"]}
 @app.post("/logout")
 def logout(response:Response): response.delete_cookie("medical_va_token",path="/");return {"ok":True}
 @app.get("/me")
@@ -66,20 +66,22 @@ def health(): return {"status":"ok"}
 
 @app.get("/dashboard/analytics")
 def dashboard_analytics(date:str|None=None,db:Session=Depends(get_db),user=Depends(current_user)):
-    try:
-        selected=datetime.strptime(date,"%Y-%m-%d") if date else datetime.now()
+    try: selected=datetime.strptime(date,"%Y-%m-%d") if date else datetime.now()
     except ValueError: raise HTTPException(400,"Date must be YYYY-MM-DD")
     day_start=selected.replace(hour=0,minute=0,second=0,microsecond=0);day_end=day_start+timedelta(days=1)
     week_start=day_start-timedelta(days=day_start.weekday());week_end=week_start+timedelta(days=7)
-    month_start=day_start.replace(day=1);month_end=(month_start.replace(year=month_start.year+1,month=1) if month_start.month==12 else month_start.replace(month=month_start.month+1))
+    month_start=day_start.replace(day=1);month_end=month_start.replace(year=month_start.year+1,month=1) if month_start.month==12 else month_start.replace(month=month_start.month+1)
     year_start=day_start.replace(month=1,day=1);year_end=year_start.replace(year=year_start.year+1)
-    def count(q): return int(q.scalar() or 0)
-    def money(start,end): return int(db.query(func.coalesce(func.sum(Billing.amount),0)).filter(Billing.status=="PAID",Billing.received_at>=start,Billing.received_at<end).scalar() or 0)
-    appointments_today=count(db.query(func.count(Appointment.id)).filter(Appointment.scheduled_for>=day_start,Appointment.scheduled_for<day_end))
-    completed_today=count(db.query(func.count(Appointment.id)).filter(Appointment.scheduled_for>=day_start,Appointment.scheduled_for<day_end,Appointment.status=="COMPLETED"))
-    patients_created_today=count(db.query(func.count(Patient.id)).filter(Patient.created_at>=day_start,Patient.created_at<day_end))
+    def scalar(q): return int(q.scalar() or 0)
+    def paid(start,end): return scalar(db.query(func.coalesce(func.sum(Billing.amount),0)).filter(Billing.status=="PAID",Billing.received_at>=start,Billing.received_at<end))
+    outstanding=scalar(db.query(func.coalesce(func.sum(Billing.amount),0)).filter(Billing.status!="PAID",Billing.status!="Cancelled"))
+    waiting=scalar(db.query(func.coalesce(func.sum(Billing.amount),0)).filter(Billing.status.in_(["WAITING","Pending","Claim Submitted","Partially Paid"])))
+    not_paid=scalar(db.query(func.coalesce(func.sum(Billing.amount),0)).filter(Billing.status=="NOT PAID"))
+    appointments=scalar(db.query(func.count(Appointment.id)).filter(Appointment.scheduled_for>=day_start,Appointment.scheduled_for<day_end))
+    completed=scalar(db.query(func.count(Appointment.id)).filter(Appointment.scheduled_for>=day_start,Appointment.scheduled_for<day_end,Appointment.status=="COMPLETED"))
+    new_patients=scalar(db.query(func.count(Patient.id)).filter(Patient.created_at>=day_start,Patient.created_at<day_end))
     calendar_items=db.query(Appointment,Patient).join(Patient,Patient.id==Appointment.patient_id).filter(Appointment.scheduled_for>=month_start,Appointment.scheduled_for<month_end).order_by(Appointment.scheduled_for).all()
-    return {"selected_date":day_start.date().isoformat(),"today":{"patients_total":count(db.query(func.count(Patient.id))),"patients_new":patients_created_today,"patients_done":completed_today,"appointments":appointments_today,"payments":money(day_start,day_end)},"payments":{"today":money(day_start,day_end),"week":money(week_start,week_end),"month":money(month_start,month_end),"year":money(year_start,year_end)},"calendar":[{"id":a.id,"patient_id":p.id,"patient_name":p.full_name,"scheduled_for":a.scheduled_for,"status":appointment_status(a),"provider":a.provider} for a,p in calendar_items]}
+    return {"selected_date":day_start.date().isoformat(),"today":{"patients_total":scalar(db.query(func.count(Patient.id))),"patients_new":new_patients,"patients_done":completed,"appointments":appointments,"payments":paid(day_start,day_end)},"payments":{"today":paid(day_start,day_end),"week":paid(week_start,week_end),"month":paid(month_start,month_end),"year":paid(year_start,year_end),"outstanding":outstanding,"waiting":waiting,"not_paid":not_paid},"calendar":[{"id":a.id,"patient_id":p.id,"patient_name":p.full_name,"scheduled_for":a.scheduled_for,"status":appointment_status(a),"provider":a.provider} for a,p in calendar_items]}
 
 @app.post("/patients")
 def create_patient(data:PatientCreate,db:Session=Depends(get_db),user=Depends(require_va)):
@@ -127,9 +129,7 @@ def update_billing(patient_id:int,billing_id:int,status:str,db:Session=Depends(g
     item=db.query(Billing).filter(Billing.id==billing_id,Billing.patient_id==patient_id).first()
     if not item: raise HTTPException(404,"Billing record not found")
     if status not in {"PAID","WAITING","NOT PAID","Pending","Claim Submitted","Partially Paid","Denied","Cancelled"}: raise HTTPException(400,"Invalid billing status")
-    item.status=status
-    item.received_at=datetime.now() if status=="PAID" else None
-    log(db,"va",f"Billing changed to {status}","billing",item.id);db.commit();return item
+    item.status=status;item.received_at=datetime.now() if status=="PAID" else None;log(db,"va",f"Billing changed to {status}","billing",item.id);db.commit();return item
 @app.post("/patients/{patient_id}/insurance")
 def add_insurance(patient_id:int,data:InsuranceCreate,db:Session=Depends(get_db),user=Depends(require_va)):
     if not db.get(Patient,patient_id): raise HTTPException(404,"Patient not found")
@@ -137,11 +137,11 @@ def add_insurance(patient_id:int,data:InsuranceCreate,db:Session=Depends(get_db)
 @app.post("/patients/{patient_id}/tasks")
 def add_task(patient_id:int,data:TaskCreate,db:Session=Depends(get_db),user=Depends(require_va)):
     if not db.get(Patient,patient_id): raise HTTPException(404,"Patient not found")
-    item=Task(patient_id=patient_id,**data.model_dump());db.add(item);db.flush();log(db,"va","Created task","task",item.id);db.commit();db.refresh(item);return {"id":item.id,"title":item.title,"status":task_status(item)}
+    item=Task(patient_id=patient_id,**data.model_dump());db.add(item);db.flush();log(db,"va","Created task","task",item.id);db.commit();db.refresh(item);return item
 @app.post("/patients/{patient_id}/followups")
 def add_followup(patient_id:int,data:FollowUpCreate,db:Session=Depends(get_db),user=Depends(require_va)):
     if not db.get(Patient,patient_id): raise HTTPException(404,"Patient not found")
-    item=FollowUp(patient_id=patient_id,**data.model_dump());db.add(item);db.flush();log(db,"va","Created follow-up","followup",item.id);db.commit();db.refresh(item);return {"id":item.id,"reason":item.reason,"status":followup_status(item)}
+    item=FollowUp(patient_id=patient_id,**data.model_dump());db.add(item);db.flush();log(db,"va","Created follow-up","followup",item.id);db.commit();db.refresh(item);return item
 @app.post("/patients/{patient_id}/notes")
 def add_note(patient_id:int,data:NoteCreate,db:Session=Depends(get_db),user=Depends(current_user)):
     if not db.get(Patient,patient_id): raise HTTPException(404,"Patient not found")
@@ -179,3 +179,8 @@ def delete_document(document_id:int,db:Session=Depends(get_db),user=Depends(requ
     item,path=get_document(document_id,db);name=item.original_name;patient_id=item.patient_id;path.unlink();db.delete(item);log(db,user["role"],f"Deleted document {name}","document",document_id);db.commit();return {"deleted":True,"patient_id":patient_id}
 @app.get("/activity")
 def activity(db:Session=Depends(get_db),user=Depends(current_user)): return db.query(Activity).order_by(Activity.created_at.desc()).limit(200).all()
+@app.get("/reports/summary")
+def report_summary(db:Session=Depends(get_db),user=Depends(current_user)):
+    def count(q): return int(q.scalar() or 0)
+    def total(q): return int(q.scalar() or 0)
+    return {"patients":count(db.query(func.count(Patient.id))),"appointments":count(db.query(func.count(Appointment.id))),"completed_appointments":count(db.query(func.count(Appointment.id)).filter(Appointment.status=="COMPLETED")),"past_due_appointments":count(db.query(func.count(Appointment.id)).filter(Appointment.status!="COMPLETED",Appointment.scheduled_for<datetime.now())),"billing_total":total(db.query(func.coalesce(func.sum(Billing.amount),0))),"paid_total":total(db.query(func.coalesce(func.sum(Billing.amount),0)).filter(Billing.status=="PAID")),"waiting_total":total(db.query(func.coalesce(func.sum(Billing.amount),0)).filter(Billing.status.in_(["WAITING","Pending","Claim Submitted","Partially Paid"]))),"not_paid_total":total(db.query(func.coalesce(func.sum(Billing.amount),0)).filter(Billing.status=="NOT PAID")),"insurance_unverified":count(db.query(func.count(Insurance.id)).filter(Insurance.status!="VERIFIED")),"open_tasks":count(db.query(func.count(Task.id)).filter(Task.status!="COMPLETED")),"overdue_tasks":count(db.query(func.count(Task.id)).filter(Task.status!="COMPLETED",Task.due_date!=None,Task.due_date<datetime.now())),"upcoming_followups":count(db.query(func.count(FollowUp.id)).filter(FollowUp.status!="Completed",FollowUp.followup_date>=datetime.now())),"overdue_followups":count(db.query(func.count(FollowUp.id)).filter(FollowUp.status!="Completed",FollowUp.followup_date<datetime.now()))}
