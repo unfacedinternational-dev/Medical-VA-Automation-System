@@ -16,7 +16,8 @@ from .auth import USERS, verify_user, create_access_token, decode_access_token
 
 BASE_DIR=Path(__file__).resolve().parent.parent
 FRONTEND=BASE_DIR/"frontend"
-STORAGE_ROOT=BASE_DIR/"storage"/"patients"
+# Vercel only guarantees writes to /tmp. Local development keeps using the project storage folder.
+STORAGE_ROOT=(Path("/tmp")/"medical_va"/"patients") if os.environ.get("VERCEL") else BASE_DIR/"storage"/"patients"
 STORAGE_ROOT.mkdir(parents=True,exist_ok=True)
 MAX_FILE_SIZE=25*1024*1024
 ALLOWED_EXTENSIONS={".pdf",".png",".jpg",".jpeg",".gif",".webp",".doc",".docx",".xls",".xlsx",".txt"}
@@ -161,26 +162,4 @@ async def upload_document(patient_id:int,file:UploadFile=File(...),db:Session=De
     data=await file.read()
     if len(data)>MAX_FILE_SIZE: raise HTTPException(413,"File exceeds 25 MB limit")
     stored_name=f"{uuid4().hex}{ext}";patient_dir=STORAGE_ROOT/str(patient_id);patient_dir.mkdir(parents=True,exist_ok=True);(patient_dir/stored_name).write_bytes(data)
-    item=PatientDocument(patient_id=patient_id,original_name=original_name,stored_name=f"{patient_id}/{stored_name}",content_type=file.content_type,file_size=len(data),uploaded_by=user["role"]);db.add(item);db.flush();log(db,user["role"],f"Uploaded document {original_name}","document",item.id);db.commit();db.refresh(item);return document_payload(item)
-def get_document(document_id,db):
-    item=db.get(PatientDocument,document_id)
-    if not item: raise HTTPException(404,"Document not found")
-    path=STORAGE_ROOT/item.stored_name
-    if not path.is_file(): raise HTTPException(404,"Stored file not found")
-    return item,path
-@app.get("/documents/{document_id}/view")
-def view_document(document_id:int,db:Session=Depends(get_db),user=Depends(current_user)):
-    item,path=get_document(document_id,db);return FileResponse(path,media_type=item.content_type or "application/octet-stream",filename=item.original_name,content_disposition_type="inline" if item.content_type in INLINE_TYPES else "attachment")
-@app.get("/documents/{document_id}/download")
-def download_document(document_id:int,db:Session=Depends(get_db),user=Depends(current_user)):
-    item,path=get_document(document_id,db);return FileResponse(path,media_type=item.content_type or "application/octet-stream",filename=item.original_name)
-@app.delete("/documents/{document_id}")
-def delete_document(document_id:int,db:Session=Depends(get_db),user=Depends(require_va)):
-    item,path=get_document(document_id,db);name=item.original_name;patient_id=item.patient_id;path.unlink();db.delete(item);log(db,user["role"],f"Deleted document {name}","document",document_id);db.commit();return {"deleted":True,"patient_id":patient_id}
-@app.get("/activity")
-def activity(db:Session=Depends(get_db),user=Depends(current_user)): return db.query(Activity).order_by(Activity.created_at.desc()).limit(200).all()
-@app.get("/reports/summary")
-def report_summary(db:Session=Depends(get_db),user=Depends(current_user)):
-    def count(q): return int(q.scalar() or 0)
-    def total(q): return int(q.scalar() or 0)
-    return {"patients":count(db.query(func.count(Patient.id))),"appointments":count(db.query(func.count(Appointment.id))),"completed_appointments":count(db.query(func.count(Appointment.id)).filter(Appointment.status=="COMPLETED")),"past_due_appointments":count(db.query(func.count(Appointment.id)).filter(Appointment.status!="COMPLETED",Appointment.scheduled_for<datetime.now())),"billing_total":total(db.query(func.coalesce(func.sum(Billing.amount),0))),"paid_total":total(db.query(func.coalesce(func.sum(Billing.amount),0)).filter(Billing.status=="PAID")),"waiting_total":total(db.query(func.coalesce(func.sum(Billing.amount),0)).filter(Billing.status.in_(["WAITING","Pending","Claim Submitted","Partially Paid"]))),"not_paid_total":total(db.query(func.coalesce(func.sum(Billing.amount),0)).filter(Billing.status=="NOT PAID")),"insurance_unverified":count(db.query(func.count(Insurance.id)).filter(Insurance.status!="VERIFIED")),"open_tasks":count(db.query(func.count(Task.id)).filter(Task.status!="COMPLETED")),"overdue_tasks":count(db.query(func.count(Task.id)).filter(Task.status!="COMPLETED",Task.due_date!=None,Task.due_date<datetime.now())),"upcoming_followups":count(db.query(func.count(FollowUp.id)).filter(FollowUp.status!="Completed",FollowUp.followup_date>=datetime.now())),"overdue_followups":count(db.query(func.count(FollowUp.id)).filter(FollowUp.status!="Completed",FollowUp.followup_date<datetime.now()))}
+    item=PatientDocument(patient_id=patient_id,original_name=original_name,stored_name=f"{patient_id}/{stored_name}",content_type=file.content_type,file_size=len(data),uploaded_by=user["role"]);db.add(item);db.flush();log(db,"va","Uploaded document","document",item.id);db.commit();db.refresh(item);return document_payload(item)
