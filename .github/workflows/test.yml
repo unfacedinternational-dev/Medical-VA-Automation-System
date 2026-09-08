@@ -1,0 +1,25 @@
+name: Backend checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - name: Compile Python sources
+        run: python -m compileall -q backend
+      - name: Import application
+        env:
+          MEDICAL_VA_SECRET_KEY: ci-only-secret
+          VA_JOY_PASSWORD_HASH: ci-only-placeholder
+          EMPLOYER_PASSWORD_HASH: ci-only-placeholder
+        run: python -c "from backend.main import app; print(app.title)"
