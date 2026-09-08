@@ -16,6 +16,11 @@
     .record-name{border:0;background:transparent;padding:0;text-align:left;font:inherit;font-weight:700;cursor:pointer;text-decoration:underline;text-decoration-color:transparent;text-underline-offset:3px}
     .record-name:hover{text-decoration-color:currentColor}
     .notes-card{overflow:hidden}.table-scroll{overflow-x:auto}.option-note{margin-top:0}
+    .patient-board .patient-name-link{font-weight:800;color:inherit;text-decoration:none;border:0;background:transparent;padding:0;cursor:pointer;font:inherit;text-align:left}
+    .patient-board .patient-name-link:hover{text-decoration:underline;text-underline-offset:3px}
+    .patient-board td{vertical-align:middle}
+    .patient-board .appointment-cell,.patient-board .insurance-cell,.patient-board .billing-cell{min-width:135px}
+    .patient-board .muted{color:#7b8794;font-size:12px}
   `;
   document.head.appendChild(style);
 
@@ -30,20 +35,53 @@
   function editRecord(kind,recordId){const item=db[kind]?.find(x=>x.id===recordId);if(!item)return;if(kind==='patients'){modal('Edit Patient',`<div class="form-grid"><label class="field">Patient name<input id="epName" value="${esc(item.name)}"></label><label class="field">Age<input id="epAge" type="number" value="${esc(item.age)}"></label><label class="field">Sex<select id="epSex"><option ${item.sex==='Female'?'selected':''}>Female</option><option ${item.sex==='Male'?'selected':''}>Male</option><option ${item.sex==='Other'?'selected':''}>Other</option><option ${item.sex==='Prefer not to say'?'selected':''}>Prefer not to say</option></select></label><label class="field">Status<select id="epStatus"><option ${item.status==='Active'?'selected':''}>Active</option><option ${item.status==='Follow-up'?'selected':''}>Follow-up</option><option ${item.status==='Pending'?'selected':''}>Pending</option></select></label></div>`,()=>{const name=$('#epName').value.trim();if(!name){toast('Patient name is required');return false}const old=item.name;item.name=name;item.age=$('#epAge').value;item.sex=$('#epSex').value;item.status=$('#epStatus').value;['appointments','tasks','followups','billing','insurance','documents','notes'].forEach(k=>(db[k]||[]).forEach(x=>{if(x.patient===old)x.patient=name}));log('Patient updated: '+name,'Patients');save();render();toast('Patient updated')});return}if(kind==='tasks'){modal('Edit Task',`<div class="form-grid"><label class="field">Task<input id="etTitle" value="${esc(item.title)}"></label><label class="field">Patient<select id="etPatient"><option value="${esc(item.patient||'')}">${esc(item.patient||'General')}</option>${patients()}</select></label><label class="field">Priority<select id="etPriority"><option ${item.priority==='High'?'selected':''}>High</option><option ${item.priority==='Medium'?'selected':''}>Medium</option><option ${item.priority==='Low'?'selected':''}>Low</option></select></label><label class="field">Status<select id="etStatus"><option ${item.status==='Open'?'selected':''}>Open</option><option ${item.status==='Completed'?'selected':''}>Completed</option></select></label></div>`,()=>{item.title=$('#etTitle').value.trim();if(!item.title){toast('Task title is required');return false}item.patient=$('#etPatient').value;item.priority=$('#etPriority').value;item.status=$('#etStatus').value;log('Task updated: '+item.title,'Tasks');save();render();toast('Task updated')});return}toast('This record can be deleted from Options. Editing for this record type will be expanded next.')}
   function deleteRecord(kind,recordId){if(!db[kind])return;if(!confirm('Delete this record?'))return;const item=db[kind].find(x=>x.id===recordId);db[kind]=db[kind].filter(x=>x.id!==recordId);log((item?.name||item?.title||item?.patient||'Record')+' deleted',kind);save();render();toast('Record deleted')}
   views.notes=notes;
-  function enhanceRecordNames(){const selectors=[['patients','[data-patient]'],['tasks','[data-complete-task]'],['appointments','[data-complete-appointment]'],['followups','[data-complete-followup]'],['billing','[data-paid]']];selectors.forEach(([kind,selector])=>document.querySelectorAll(selector).forEach(btn=>{const row=btn.closest('tr');if(!row)return;const cell=kind==='patients'?row.cells[1]:kind==='tasks'?row.cells[0]:row.cells[1];if(!cell||cell.querySelector('.record-name'))return;const recordId=btn.dataset.patient||btn.dataset.completeTask||btn.dataset.completeAppointment||btn.dataset.completeFollowup||btn.dataset.paid;const text=cell.textContent.trim();if(!recordId||!text)return;cell.innerHTML=`<button class="record-name" data-record-options="${esc(kind)}|${esc(recordId)}">${esc(text)}</button>`}))}
+  function enhanceRecordNames(){const selectors=[['patients','[data-patient]'],['tasks','[data-complete-task]'],['appointments','[data-complete-appointment]'],['followups','[data-complete-followup]'],['billing','[data-paid]']];selectors.forEach(([kind,selector])=>document.querySelectorAll(selector).forEach(btn=>{const row=btn.closest('tr');if(!row)return;const cell=kind==='patients'?row.cells[1]:kind==='tasks'?row.cells[0]:row.cells[1];if(!cell||cell.querySelector('.record-name'))return;const recordId=btn.dataset.patient||btn.dataset.completeTask||btn.dataset.completeAppointment||btn.dataset.completeFollowup||btn.dataset.paid;const text=cell.textContent.trim();if(!recordId||!text)return;if(kind==='patients'){cell.innerHTML=`<button class="patient-name-link" data-patient="${esc(recordId)}">${esc(text)}</button>`}else{cell.innerHTML=`<button class="record-name" data-record-options="${esc(kind)}|${esc(recordId)}">${esc(text)}</button>`}}))}
   const observer=new MutationObserver(enhanceRecordNames);observer.observe($('#content'),{childList:true,subtree:true});enhanceRecordNames();
   function bindNoteFilter(){const f=$('#noteFilter');if(!f||f.dataset.bound)return;f.dataset.bound='1';f.addEventListener('change',()=>{const q=f.value;document.querySelectorAll('[data-note-row]').forEach(r=>r.style.display=q==='all'||r.classList.contains('note-row-'+q)?'':'none')})}
   document.addEventListener('click',e=>{
     const home=e.target.closest('#homePageBtn');
-    if(home){
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      sessionStorage.removeItem('mva-authenticated-role');
-      document.getElementById('authLanding')?.remove();
-      document.body.classList.remove('auth-page');
-      window.location.replace('./');
-      return;
-    }
+    if(home){e.preventDefault();e.stopImmediatePropagation();sessionStorage.removeItem('mva-authenticated-role');document.getElementById('authLanding')?.remove();document.body.classList.remove('auth-page');window.location.replace('./');return;}
     const notification=e.target.closest('#notificationBtn');if(notification){e.preventDefault();e.stopImmediatePropagation();go('notes');return}const no=e.target.closest('[data-note-menu]');if(no){e.preventDefault();e.stopImmediatePropagation();noteOptions(no.dataset.noteMenu);return}const ro=e.target.closest('[data-record-options]');if(ro){e.preventDefault();e.stopImmediatePropagation();const [kind,recordId]=ro.dataset.recordOptions.split('|');recordOptions(kind,recordId);return}const add=e.target.closest('[data-action="add-note"]');if(add){e.preventDefault();e.stopImmediatePropagation();addNote();return}if(view==='notes')setTimeout(bindNoteFilter,0)},true);
   render();bindNoteFilter();
+})();
+
+/* Simplified patient board: identity first, operational status at a glance, details inside View Actions. */
+(function(){
+  function latestForPatient(collection,name,sortKey){
+    const items=(db[collection]||[]).filter(x=>x.patient===name);
+    if(!items.length)return null;
+    if(!sortKey)return items[items.length-1];
+    return [...items].sort((a,b)=>String(b[sortKey]||'').localeCompare(String(a[sortKey]||'')))[0];
+  }
+  function compactAppointment(name){
+    const a=latestForPatient('appointments',name,'date');
+    if(!a)return '<span class="muted">No appointment</span>';
+    const date=a.date?new Date(a.date+'T00:00:00').toLocaleDateString(undefined,{month:'short',day:'numeric'}):'';
+    return `<b>${esc(a.type||'Appointment')}</b><br><span class="muted">${esc(date)}${a.time?' · '+esc(a.time):''}</span>`;
+  }
+  function compactInsurance(name){
+    const i=latestForPatient('insurance',name,'lastCheck');
+    return i?badge(i.status||'Pending'):'<span class="muted">Not entered</span>';
+  }
+  function compactBilling(name){
+    const items=(db.billing||[]).filter(x=>x.patient===name);
+    if(!items.length)return '<span class="muted">No billing</span>';
+    const open=items.filter(x=>!/^paid$/i.test(x.status||''));
+    const b=open[0]||items[items.length-1];
+    return `<b>₱${Number(b.amount||0).toLocaleString()}</b><br>${badge(b.status||'Pending')}`;
+  }
+  function simplifiedPatients(){
+    const rows=db.patients.map(p=>`<tr>
+      <td><button class="patient-name-link" data-patient="${esc(p.id)}">${esc(p.name)}</button></td>
+      <td>${esc(p.age||'—')}</td>
+      <td>${esc(p.sex||'—')}</td>
+      <td class="appointment-cell">${compactAppointment(p.name)}</td>
+      <td class="insurance-cell">${compactInsurance(p.name)}</td>
+      <td class="billing-cell">${compactBilling(p.name)}</td>
+      <td><button class="btn" data-record-options="patients|${esc(p.id)}">View Actions</button></td>
+    </tr>`).join('');
+    return head('Patients','At-a-glance patient overview.','＋ Add Patient','add-patient')+`<div class="toolbar"><input class="filter search-wide" id="patientSearch" placeholder="Search patients..."><select class="filter" id="patientStatus"><option>All statuses</option><option>Active</option><option>Follow-up</option><option>Pending</option></select></div><div class="card patient-board"><div class="table-scroll">${table(['Patient','Age','Gender','Appointment','Insurance','Billing','Action'],rows)}</div></div>`;
+  }
+  views.patients=simplifiedPatients;
+  render();
 })();
