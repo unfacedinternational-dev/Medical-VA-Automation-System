@@ -7,6 +7,12 @@ function showLanding(){
   appEl.classList.add('auth-hidden');
   document.body.classList.add('auth-page');
   appEl.insertAdjacentHTML('beforebegin',`<main id="authLanding" class="auth-landing">
+    <div class="auth-collage" aria-hidden="true">
+      <div class="auth-photo photo-equipment"></div>
+      <div class="auth-photo photo-doctor"></div>
+      <div class="auth-photo photo-mask"></div>
+      <div class="auth-photo photo-team"></div>
+    </div>
     <section class="auth-hero">
       <div class="auth-brand"><div class="auth-mark">M</div><div><b>MEDICAL VA</b><span>AUTOMATION SYSTEM</span></div></div>
       <div class="auth-badge">PERSONALIZED WORKSPACE</div>
