@@ -1,15 +1,24 @@
 from datetime import datetime
-from fastapi import FastAPI, Depends, HTTPException
+from pathlib import Path
+from uuid import uuid4
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session, joinedload
 from .database import Base, engine, get_db
-from .models import Patient, Appointment, Billing, Insurance, Task, FollowUp, Note, Activity
+from .models import Patient, Appointment, Billing, Insurance, Task, FollowUp, Note, Activity, PatientDocument
 from .crud import patient_detail, patient_summary, appointment_status, task_status, followup_status, log
 
 Base.metadata.create_all(bind=engine)
 app = FastAPI(title="Medical VA Automation System")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=False, allow_methods=["*"], allow_headers=["*"])
+
+STORAGE_ROOT = Path(__file__).resolve().parent.parent / "storage" / "patients"
+STORAGE_ROOT.mkdir(parents=True, exist_ok=True)
+MAX_FILE_SIZE = 25 * 1024 * 1024
+ALLOWED_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".doc", ".docx", ".xls", ".xlsx", ".txt"}
+INLINE_TYPES = {"application/pdf", "image/png", "image/jpeg", "image/gif", "image/webp"}
 
 class PatientCreate(BaseModel):
     full_name: str = Field(min_length=2, max_length=200)
@@ -45,6 +54,9 @@ class NoteCreate(BaseModel):
     note_type: str
     content: str = Field(min_length=1)
 
+def document_payload(x):
+    return {"id":x.id,"original_name":x.original_name,"content_type":x.content_type,"file_size":x.file_size,"uploaded_by":x.uploaded_by,"created_at":x.created_at,"view_url":f"/documents/{x.id}/view","download_url":f"/documents/{x.id}/download"}
+
 @app.get("/health")
 def health(): return {"status":"ok"}
 
@@ -59,7 +71,7 @@ def list_patients(db: Session = Depends(get_db)):
 
 @app.get("/patients/{patient_id}")
 def patient_record(patient_id:int, db:Session=Depends(get_db)):
-    p=db.query(Patient).options(joinedload(Patient.appointments),joinedload(Patient.billings),joinedload(Patient.insurances),joinedload(Patient.tasks),joinedload(Patient.followups),joinedload(Patient.notes)).filter(Patient.id==patient_id).first()
+    p=db.query(Patient).options(joinedload(Patient.appointments),joinedload(Patient.billings),joinedload(Patient.insurances),joinedload(Patient.tasks),joinedload(Patient.followups),joinedload(Patient.notes),joinedload(Patient.documents)).filter(Patient.id==patient_id).first()
     if not p: raise HTTPException(404,"Patient not found")
     return patient_detail(p)
 
@@ -106,6 +118,56 @@ def add_note(patient_id:int,data:NoteCreate,db:Session=Depends(get_db)):
     if not db.get(Patient,patient_id): raise HTTPException(404,"Patient not found")
     if data.note_type not in {"MY NOTES","EMPLOYER NOTES","SHARED NOTES"}: raise HTTPException(400,"Invalid note type")
     item=Note(patient_id=patient_id,**data.model_dump()); db.add(item); db.flush(); log(db,data.author_role,"Added note","note",item.id); db.commit(); db.refresh(item); return item
+
+@app.get("/patients/{patient_id}/documents")
+def list_documents(patient_id:int,db:Session=Depends(get_db)):
+    if not db.get(Patient,patient_id): raise HTTPException(404,"Patient not found")
+    return [document_payload(x) for x in db.query(PatientDocument).filter(PatientDocument.patient_id==patient_id).order_by(PatientDocument.created_at.desc()).all()]
+
+@app.post("/patients/{patient_id}/documents")
+async def upload_document(patient_id:int,file:UploadFile=File(...),db:Session=Depends(get_db)):
+    patient=db.get(Patient,patient_id)
+    if not patient: raise HTTPException(404,"Patient not found")
+    original_name=Path(file.filename or "document").name
+    ext=Path(original_name).suffix.lower()
+    if ext not in ALLOWED_EXTENSIONS: raise HTTPException(400,"Unsupported file type")
+    data=await file.read()
+    if len(data)>MAX_FILE_SIZE: raise HTTPException(413,"File exceeds 25 MB limit")
+    stored_name=f"{uuid4().hex}{ext}"
+    patient_dir=STORAGE_ROOT / str(patient_id); patient_dir.mkdir(parents=True,exist_ok=True)
+    target=patient_dir / stored_name
+    target.write_bytes(data)
+    item=PatientDocument(patient_id=patient_id,original_name=original_name,stored_name=f"{patient_id}/{stored_name}",content_type=file.content_type,file_size=len(data),uploaded_by="va")
+    db.add(item); db.flush(); log(db,"va",f"Uploaded document {original_name}","document",item.id); db.commit(); db.refresh(item)
+    return document_payload(item)
+
+@app.get("/documents/{document_id}/view")
+def view_document(document_id:int,db:Session=Depends(get_db)):
+    item=db.get(PatientDocument,document_id)
+    if not item: raise HTTPException(404,"Document not found")
+    path=STORAGE_ROOT / item.stored_name
+    if not path.is_file(): raise HTTPException(404,"Stored file not found")
+    disposition="inline" if item.content_type in INLINE_TYPES else "attachment"
+    return FileResponse(path,media_type=item.content_type or "application/octet-stream",filename=item.original_name,headers={"Content-Disposition":f'{disposition}; filename="{item.original_name.replace(chr(34), "")}"'})
+
+@app.get("/documents/{document_id}/download")
+def download_document(document_id:int,db:Session=Depends(get_db)):
+    item=db.get(PatientDocument,document_id)
+    if not item: raise HTTPException(404,"Document not found")
+    path=STORAGE_ROOT / item.stored_name
+    if not path.is_file(): raise HTTPException(404,"Stored file not found")
+    return FileResponse(path,media_type=item.content_type or "application/octet-stream",filename=item.original_name)
+
+@app.delete("/documents/{document_id}")
+def delete_document(document_id:int,db:Session=Depends(get_db)):
+    item=db.get(PatientDocument,document_id)
+    if not item: raise HTTPException(404,"Document not found")
+    path=STORAGE_ROOT / item.stored_name
+    if path.is_file(): path.unlink()
+    patient_id=item.patient_id
+    name=item.original_name
+    db.delete(item); log(db,"va",f"Deleted document {name}","document",document_id); db.commit()
+    return {"deleted":True,"patient_id":patient_id}
 
 @app.get("/activity")
 def activity(db:Session=Depends(get_db)):
