@@ -34,6 +34,7 @@ def require_va(user=Depends(current_user)):
     return user
 class LoginRequest(BaseModel): username:str; password:str
 class PatientCreate(BaseModel): full_name:str=Field(min_length=2,max_length=200); age:int=Field(ge=0,le=130); gender:str=Field(min_length=1,max_length=50)
+class PatientUpdate(BaseModel): full_name:str=Field(min_length=2,max_length=200); age:int=Field(ge=0,le=130); gender:str=Field(min_length=1,max_length=50)
 class AppointmentCreate(BaseModel): scheduled_for:datetime; provider:str|None=None; notes:str|None=None
 class BillingCreate(BaseModel): amount:int=Field(ge=0); status:str="WAITING"; description:str|None=None
 class InsuranceCreate(BaseModel): provider:str; policy_number:str|None=None; group_number:str|None=None; eligibility:str|None=None; verification_date:datetime|None=None; status:str="WAITING FOR VERIFICATION"; notes:str|None=None
@@ -66,6 +67,23 @@ def patient_record(patient_id:int,db:Session=Depends(get_db),user=Depends(curren
     p=db.query(Patient).options(selectinload(Patient.appointments),selectinload(Patient.billings),selectinload(Patient.insurances),selectinload(Patient.tasks),selectinload(Patient.followups),selectinload(Patient.notes),selectinload(Patient.documents)).filter(Patient.id==patient_id).first()
     if not p: raise HTTPException(404,"Patient not found")
     return patient_detail(p)
+@app.patch("/patients/{patient_id}")
+def update_patient(patient_id:int,data:PatientUpdate,db:Session=Depends(get_db),user=Depends(require_va)):
+    patient=db.get(Patient,patient_id)
+    if not patient: raise HTTPException(404,"Patient not found")
+    patient.full_name=data.full_name.strip();patient.age=data.age;patient.gender=data.gender.strip()
+    log(db,"va","Updated patient","patient",patient.id);db.commit();db.refresh(patient);return patient_summary(patient)
+@app.delete("/patients/{patient_id}")
+def delete_patient(patient_id:int,db:Session=Depends(get_db),user=Depends(require_va)):
+    patient=db.get(Patient,patient_id)
+    if not patient: raise HTTPException(404,"Patient not found")
+    name=patient.full_name
+    patient_dir=STORAGE_ROOT/str(patient_id)
+    if patient_dir.exists():
+        for path in patient_dir.iterdir():
+            if path.is_file(): path.unlink()
+        patient_dir.rmdir()
+    db.delete(patient);log(db,"va",f"Deleted patient {name}","patient",patient_id);db.commit();return {"deleted":True,"patient_id":patient_id}
 @app.post("/patients/{patient_id}/appointments")
 def add_appointment(patient_id:int,data:AppointmentCreate,db:Session=Depends(get_db),user=Depends(require_va)):
     if not db.get(Patient,patient_id): raise HTTPException(404,"Patient not found")
