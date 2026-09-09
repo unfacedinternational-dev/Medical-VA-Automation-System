@@ -1,54 +1,68 @@
 import os
+import base64
+import hashlib
+import hmac
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 from jose import jwt
 from passlib.context import CryptContext
+from sqlalchemy import text
+from .database import engine
 
 SECRET_KEY = os.environ.get("MEDICAL_VA_SECRET_KEY")
 ALGORITHM = "HS256"
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 USERS = {
-    "va_joy": {"display_name": "VA Joy", "role": "va", "password_hash_env": "VA_JOY_PASSWORD_HASH"},
-    "employer": {"display_name": "Employer", "role": "employer", "password_hash_env": "EMPLOYER_PASSWORD_HASH"},
+    "va_joy": {"display_name": "VA Joy", "role": "va"},
+    "employer": {"display_name": "Employer", "role": "employer"},
 }
 
-# Current private workspace login. Both accounts use the same temporary password.
-# The configured bcrypt hashes remain supported as an additional login method.
-DEFAULT_LOGIN_PASSWORD = "2026"
 
 def _secret():
     if not SECRET_KEY or SECRET_KEY == "CHANGE_THIS_IN_SERVER_ENVIRONMENT":
         raise RuntimeError("MEDICAL_VA_SECRET_KEY is not configured")
     return SECRET_KEY
 
-def _password_hash(username: str):
-    user = USERS.get(username)
-    if not user:
+
+def _credential_hash():
+    try:
+        with engine.connect() as conn:
+            return conn.execute(text("select password_hash from public.medical_va_credentials where id = 1")).scalar()
+    except Exception:
         return None
-    return os.environ.get(user["password_hash_env"])
+
+
+def _verify_workspace_password(password: str) -> bool:
+    stored = _credential_hash()
+    if not stored or "." not in stored:
+        return False
+    try:
+        salt_b64, digest_b64 = stored.split(".", 1)
+        salt = base64.urlsafe_b64decode(salt_b64.encode())
+        expected = base64.urlsafe_b64decode(digest_b64.encode())
+        actual = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 600000)
+        return hmac.compare_digest(actual, expected)
+    except Exception:
+        return False
+
 
 def hash_password(password: str) -> str:
     return pwd_context.hash(password)
 
+
 def verify_user(username: str, password: str) -> bool:
     if username not in USERS:
         return False
-    # 2026 works for both VA Joy and Employer, without requiring local
-    # password-hash generation or any password changes in Vercel.
-    if password == DEFAULT_LOGIN_PASSWORD:
+    if _verify_workspace_password(password):
         return True
-    stored = _password_hash(username)
-    if not stored:
-        return False
-    try:
-        return bool(pwd_context.verify(password, stored))
-    except Exception:
-        return False
+    return False
+
 
 def create_access_token(subject: str, minutes: int = 480) -> str:
     expire = datetime.now(timezone.utc) + timedelta(minutes=minutes)
     return jwt.encode({"sub": subject, "exp": expire}, _secret(), algorithm=ALGORITHM)
+
 
 def decode_access_token(token: str) -> Optional[str]:
     try:
