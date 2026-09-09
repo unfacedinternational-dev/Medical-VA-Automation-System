@@ -24,8 +24,8 @@ function showLanding(){
     </section>
   </main>`);
   document.getElementById('howItWorks').onclick=showHow;
-  document.getElementById('joyLogin').onclick=showSharedLogin;
-  document.getElementById('employerLogin').onclick=showSharedLogin;
+  document.getElementById('joyLogin').onclick=()=>showSharedLogin('va_joy');
+  document.getElementById('employerLogin').onclick=()=>showSharedLogin('employer');
 }
 
 function closeAuth(){modalEl.innerHTML=''}
@@ -44,7 +44,7 @@ function showHow(){
   modalEl.querySelectorAll('[data-auth-close]').forEach(x=>x.onclick=closeAuth);
 }
 
-function showSharedLogin(){
+function showSharedLogin(username){
   modalEl.innerHTML=`<div class="modal-backdrop auth-modal-backdrop"><div class="modal"><div class="modal-head"><h3>Authorized access</h3><button class="icon-btn" data-auth-close>×</button></div><div class="modal-body"><div class="auth-form"><label class="field"><span>Shared password</span><input id="authPassword" type="password" autocomplete="current-password" placeholder="Enter password"></label><p class="auth-error"></p></div></div><div class="modal-foot"><button class="btn" data-auth-close>Cancel</button><button class="btn primary" id="submitShared">Enter workspace</button></div></div></div>`;
   modalEl.querySelectorAll('[data-auth-close]').forEach(x=>x.onclick=closeAuth);
   document.getElementById('submitShared').onclick=async()=>{
@@ -52,10 +52,10 @@ function showSharedLogin(){
     const errorEl=document.querySelector('.auth-error');
     errorEl.textContent='';
     try{
-      const response=await fetch('/login',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'include',body:JSON.stringify({username:'va_joy',password})});
+      const response=await fetch('/login',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'include',body:JSON.stringify({username,password})});
       if(!response.ok) throw new Error('Access denied. Incorrect password.');
       const result=await response.json();
-      sessionStorage.setItem(AUTH_KEY,result.role||'va');
+      sessionStorage.setItem(AUTH_KEY,result.role||username);
       document.getElementById('authLanding')?.remove();
       document.body.classList.remove('auth-page');
       appEl.classList.remove('auth-hidden');
