@@ -1,5 +1,4 @@
 const AUTH_KEY='mva-authenticated-role';
-const SHARED_PASSWORD='2026';
 const appEl=document.getElementById('app');
 const modalEl=document.getElementById('modalRoot');
 
@@ -21,7 +20,7 @@ function showLanding(){
         <div class="access-card"><div class="access-icon">VA</div><div><h2>VA Joy</h2><p>Enter the shared authorized password to access the workspace.</p></div><button class="auth-secondary" id="joyLogin">Enter as VA</button></div>
         <div class="access-card"><div class="access-icon">EM</div><div><h2>Employer</h2><p>Enter the same shared authorized password to access the workspace.</p></div><button class="auth-secondary" id="employerLogin">Enter as Employer</button></div>
       </div>
-      <p class="auth-note">This workspace uses one shared password for the two authorized users. For production use with real patient information, server-side authentication and secure healthcare-compliant storage should be enabled.</p>
+      <p class="auth-note">This is a private internal workspace. Authentication is verified server-side and the credential is never stored in this client code.</p>
     </section>
   </main>`);
   document.getElementById('howItWorks').onclick=showHow;
@@ -40,7 +39,7 @@ function showHow(){
     <div class="info-block"><b>5. Billing & insurance</b><span>Track claims, payment status, eligibility checks, and related follow-up work from one place.</span></div>
     <div class="info-block"><b>6. Documents & files</b><span>Organize files alongside the patient and operational records that need them.</span></div>
     <div class="info-columns"><div><h4>How it helps the VA</h4><ul><li>Less repetitive manual tracking</li><li>Clear priorities and work queues</li><li>Fewer missed follow-ups</li><li>Centralized operational records</li><li>Clear visibility of completed work</li></ul></div><div><h4>How it helps the employer</h4><ul><li>Visibility into workflow status</li><li>Consistent administrative processes</li><li>Easier monitoring of claims and tasks</li><li>Centralized operational information</li><li>Better reporting and accountability</li></ul></div></div>
-    <div class="info-note"><b>Security:</b> The shared-password login is suitable for the current private workspace prototype. Do not enter real patient/PHI data until secure server-side authentication, access control, encrypted storage, and an appropriate healthcare-compliant backend are implemented.</div>
+    <div class="info-note"><b>Security:</b> Authentication is handled by the server and the credential is stored outside the public client.</div>
   </div><div class="modal-foot"><button class="btn primary" data-auth-close>Got it</button></div></div></div>`;
   modalEl.querySelectorAll('[data-auth-close]').forEach(x=>x.onclick=closeAuth);
 }
@@ -48,10 +47,20 @@ function showHow(){
 function showSharedLogin(){
   modalEl.innerHTML=`<div class="modal-backdrop auth-modal-backdrop"><div class="modal"><div class="modal-head"><h3>Authorized access</h3><button class="icon-btn" data-auth-close>×</button></div><div class="modal-body"><div class="auth-form"><label class="field"><span>Shared password</span><input id="authPassword" type="password" autocomplete="current-password" placeholder="Enter password"></label><p class="auth-error"></p></div></div><div class="modal-foot"><button class="btn" data-auth-close>Cancel</button><button class="btn primary" id="submitShared">Enter workspace</button></div></div></div>`;
   modalEl.querySelectorAll('[data-auth-close]').forEach(x=>x.onclick=closeAuth);
-  document.getElementById('submitShared').onclick=()=>{
+  document.getElementById('submitShared').onclick=async()=>{
     const password=document.getElementById('authPassword').value;
-    if(password===SHARED_PASSWORD) authenticate('authorized');
-    else document.querySelector('.auth-error').textContent='Access denied. Incorrect password.';
+    const errorEl=document.querySelector('.auth-error');
+    errorEl.textContent='';
+    try{
+      const response=await fetch('/login',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'include',body:JSON.stringify({username:'va_joy',password})});
+      if(!response.ok) throw new Error('Access denied. Incorrect password.');
+      const result=await response.json();
+      sessionStorage.setItem(AUTH_KEY,result.role||'va');
+      document.getElementById('authLanding')?.remove();
+      document.body.classList.remove('auth-page');
+      appEl.classList.remove('auth-hidden');
+      closeAuth();
+    }catch(error){errorEl.textContent=error.message||'Unable to authenticate.';}
   };
   document.getElementById('authPassword').addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('submitShared').click()});
 }
